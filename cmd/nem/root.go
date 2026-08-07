@@ -54,7 +54,12 @@ func newRoot() *cobra.Command {
 	pf.BoolVar(&flagVerbose, "verbose", false, "show debug output")
 	pf.StringVar(&flagColor, "color", "auto", "colorize output: auto, always, or never")
 
-	root.AddCommand(newVersionCmd(), newStatusCmd())
+	// Cobra gotchas for future commands:
+	//  - required-flag and flag-group validation runs AFTER PersistentPreRunE,
+	//    so those failures exit 1 (runtime), not 2 (usage).
+	//  - a subcommand defining its own PersistentPreRunE REPLACES this root
+	//    hook — console/nemHome would stay nil. Don't do that.
+	root.AddCommand(newVersionCmd(), newStatusCmd(), newCatalogCmd())
 	return root
 }
 

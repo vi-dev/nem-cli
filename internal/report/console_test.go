@@ -91,6 +91,20 @@ func TestTableRaggedRows(t *testing.T) {
 	}
 }
 
+func TestHintSuppressedByQuiet(t *testing.T) {
+	c, _, errb := newTest(Options{Color: ColorNever})
+	c.Hint("Run `nem catalog update dev` to sync it")
+	if !strings.Contains(errb.String(), "  hint: Run `nem catalog update dev` to sync it\n") {
+		t.Errorf("hint line wrong: %q", errb.String())
+	}
+
+	cq, _, errbq := newTest(Options{Quiet: true, Color: ColorNever})
+	cq.Hint("nope")
+	if strings.Contains(errbq.String(), "nope") {
+		t.Errorf("quiet did not suppress hint: %q", errbq.String())
+	}
+}
+
 func TestColorAutoFollowsTTY(t *testing.T) {
 	c, _, errb := newTest(Options{Color: ColorAuto, IsTTY: true})
 	c.Success("On")

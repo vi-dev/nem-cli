@@ -1,0 +1,95 @@
+package ocix
+
+import (
+	"context"
+	"errors"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"oras.land/oras-go/v2/content/oci"
+)
+
+func TestSyncAndLoad(t *testing.T) {
+	ctx := context.Background()
+	srcDir := t.TempDir()
+	src, err := oci.New(srcDir)
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	goYAML := []byte("schema: 2\nname: go\n") // content is opaque to ocix; not parsed here
+	kubectlYAML := []byte("schema: 2\nname: kubectl\n")
+	PushFakeCatalogForTest(t, src, []FakeEntry{
+		{Name: "go", Description: "The Go programming language", Latest: "v1.26.5", YAML: goYAML},
+		{Name: "kubectl", Description: "Kubernetes CLI", Latest: "v1.34.1", YAML: kubectlYAML},
+	}, "2")
+
+	storePath := filepath.Join(t.TempDir(), "store")
+	dig, err := SyncFrom(ctx, src, "v2", storePath)
+	if err != nil {
+		t.Fatalf("SyncFrom: %v", err)
+	}
+	if !strings.HasPrefix(dig, "sha256:") {
+		t.Fatalf("index digest: %q", dig)
+	}
+
+	idx, err := LoadIndex(ctx, storePath)
+	if err != nil || len(idx.Manifests) != 2 {
+		t.Fatalf("LoadIndex: %+v, %v", idx, err)
+	}
+
+	data, mdig, err := LoadPkgBytes(ctx, storePath, "go")
+	if err != nil || string(data) != string(goYAML) || !strings.HasPrefix(mdig, "sha256:") {
+		t.Fatalf("LoadPkgBytes: %q, %q, %v", data, mdig, err)
+	}
+
+	var nf *PkgNotInIndexError
+	if _, _, err := LoadPkgBytes(ctx, storePath, "absent"); !errors.As(err, &nf) {
+		t.Fatalf("want PkgNotInIndexError, got %v", err)
+	}
+}
+
+func TestSyncRejectsWrongSchema(t *testing.T) {
+	ctx := context.Background()
+	storePath := filepath.Join(t.TempDir(), "store")
+
+	good, _ := oci.New(t.TempDir())
+	PushFakeCatalogForTest(t, good, []FakeEntry{{Name: "go", YAML: []byte("x")}}, "2")
+	if _, err := SyncFrom(ctx, good, "v2", storePath); err != nil {
+		t.Fatalf("seed sync: %v", err)
+	}
+
+	bad, _ := oci.New(t.TempDir())
+	PushFakeCatalogForTest(t, bad, []FakeEntry{{Name: "go", YAML: []byte("x")}}, "9")
+	_, err := SyncFrom(ctx, bad, "v2", storePath)
+	if err == nil || !strings.Contains(err.Error(), "schema") {
+		t.Fatalf("want schema error, got %v", err)
+	}
+
+	idx, err := LoadIndex(ctx, storePath)
+	if err != nil || len(idx.Manifests) != 1 {
+		t.Fatalf("good mirror clobbered by bad-schema sync attempt: %+v, %v", idx, err)
+	}
+}
+
+func TestLoadPkgBytesUnsynced(t *testing.T) {
+	_, _, err := LoadPkgBytes(context.Background(), filepath.Join(t.TempDir(), "nope"), "go")
+	if !errors.Is(err, ErrNotSynced) {
+		t.Fatalf("want ErrNotSynced, got %v", err)
+	}
+}
+
+func TestSyncIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	src, _ := oci.New(t.TempDir())
+	PushFakeCatalogForTest(t, src, []FakeEntry{{Name: "go", YAML: []byte("y")}}, "2")
+	storePath := filepath.Join(t.TempDir(), "store")
+	d1, err := SyncFrom(ctx, src, "v2", storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d2, err := SyncFrom(ctx, src, "v2", storePath)
+	if err != nil || d1 != d2 {
+		t.Fatalf("resync: %q vs %q, %v", d1, d2, err)
+	}
+}

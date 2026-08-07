@@ -98,6 +98,19 @@ func (c *Console) Error(err error, hint string) {
 	}
 }
 
+// Hint prints a dim remediation line accompanying narration; suppressed by
+// Quiet like other narration.
+func (c *Console) Hint(msg string) {
+	if c.opts.Quiet {
+		return
+	}
+	if c.colored {
+		fmt.Fprintf(c.err, "  %s→ %s%s\n", ansiDim, msg, ansiReset)
+	} else {
+		fmt.Fprintf(c.err, "  hint: %s\n", msg)
+	}
+}
+
 func (c *Console) Table(headers []string, rows [][]string) {
 	// Find max column count across headers and all rows
 	maxCols := len(headers)
