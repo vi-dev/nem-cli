@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -16,6 +17,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
 // ArchivesRef derives the archives repo for a package from a catalog ref:
@@ -63,7 +65,7 @@ func RemoteArchives(catalogRef, name string) (oras.ReadOnlyTarget, error) {
 func PullArchiveFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, plat spec.Platform, dir string) (string, error) {
 	idxDesc, err := src.Resolve(ctx, srcRef)
 	if err != nil {
-		if errors.Is(err, errdef.ErrNotFound) {
+		if archiveAbsent(err) {
 			return "", fmt.Errorf("resolve archive ref %s: %w", srcRef, ErrArchiveNotFound)
 		}
 		return "", fmt.Errorf("resolve archive ref %s: %w", srcRef, err)
@@ -101,6 +103,21 @@ func PullArchiveFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef string
 	}
 
 	return writeTempArchive(dir, data)
+}
+
+// archiveAbsent reports whether err from an archives-repo read means the
+// archive is simply not there (a plain not-found, or a registry 403/404 for
+// an absent-or-inaccessible repo — GHCR answers 403 for a missing repo), as
+// opposed to a genuine failure worth surfacing.
+func archiveAbsent(err error) bool {
+	if errors.Is(err, errdef.ErrNotFound) {
+		return true
+	}
+	var resp *errcode.ErrorResponse
+	if errors.As(err, &resp) {
+		return resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound
+	}
+	return false
 }
 
 // manifestForPlatform returns the manifest descriptor in idx whose platform

@@ -40,6 +40,16 @@ var pullArchive = func(ctx context.Context, catalogRef, name, tag string, plat s
 	return ocix.PullArchiveFrom(ctx, repo, tag, plat, dir)
 }
 
+// SetPullArchiveForTest swaps the pullArchive package var Acquire's
+// registry-first fetch path uses and returns a closure that restores the
+// previous implementation. Test-only: it lets a caller outside this
+// package stub the registry pull without a real OCI registry.
+func SetPullArchiveForTest(f func(ctx context.Context, catalogRef, name, tag string, plat spec.Platform, dir string) (string, error)) (restore func()) {
+	prev := pullArchive
+	pullArchive = f
+	return func() { pullArchive = prev }
+}
+
 // remoteByRef opens the repository named by an absolute oci ref and pulls
 // plat's archive from it into dir; overridden in tests.
 var remoteByRef = func(ctx context.Context, ref string, plat spec.Platform, dir string) (string, error) {

@@ -3,6 +3,7 @@ package ocix
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,8 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/vi-dev/nem-cli/internal/spec"
 	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/errdef"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
 func TestPullArchiveFromReturnsRightPlatform(t *testing.T) {
@@ -113,6 +116,45 @@ func TestPullArchiveFromNonNotFoundErrorPassesThrough(t *testing.T) {
 	}
 	if !errors.Is(err, authErr) {
 		t.Fatalf("want wrapped authErr, got %v", err)
+	}
+}
+
+func TestArchiveAbsent(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"errdef not found", errdef.ErrNotFound, true},
+		{"403 forbidden", &errcode.ErrorResponse{StatusCode: 403}, true},
+		{"404 not found", &errcode.ErrorResponse{StatusCode: 404}, true},
+		{"401 unauthorized", &errcode.ErrorResponse{StatusCode: 401}, false},
+		{"500 internal error", &errcode.ErrorResponse{StatusCode: 500}, false},
+		{"plain error", errors.New("x"), false},
+		{"wrapped 403", fmt.Errorf("ctx: %w", &errcode.ErrorResponse{StatusCode: 403}), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := archiveAbsent(c.err); got != c.want {
+				t.Fatalf("archiveAbsent(%v) = %v, want %v", c.err, got, c.want)
+			}
+		})
+	}
+}
+
+func TestPullArchiveFromForbiddenMapsToArchiveNotFound(t *testing.T) {
+	ctx := context.Background()
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	PushFakeArchive(t, store, "v1.26.5", map[string][]byte{"linux/amd64": []byte("x")})
+
+	faulty := resolveErrTarget{Store: store, err: &errcode.ErrorResponse{StatusCode: 403}}
+
+	_, err = PullArchiveFrom(ctx, faulty, "v1.26.5", spec.Platform{OS: "linux", Arch: "amd64"}, t.TempDir())
+	if !errors.Is(err, ErrArchiveNotFound) {
+		t.Fatalf("want ErrArchiveNotFound for a 403 resolve error, got %v", err)
 	}
 }
 

@@ -33,21 +33,41 @@ func ValidateRef(ref string) error {
 	return nil
 }
 
-// RemoteCatalog opens ref (e.g. "ghcr.io/org/cat:v2") as a read-only oras
-// target with docker-config credentials, returning the target and the
-// reference (tag or digest) to copy from.
-func RemoteCatalog(ref string) (oras.ReadOnlyTarget, string, error) {
+// newRepository opens ref as a *remote.Repository with docker-config
+// credentials, shared by RemoteCatalog and RemoteCatalogRW.
+func newRepository(ref string) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
-		return nil, "", fmt.Errorf("parse catalog ref %q: %w", ref, err)
+		return nil, fmt.Errorf("parse catalog ref %q: %w", ref, err)
 	}
 	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 	if err != nil {
-		return nil, "", fmt.Errorf("open docker credentials: %w", err)
+		return nil, fmt.Errorf("open docker credentials: %w", err)
 	}
 	repo.Client = &auth.Client{
 		Credential: credentials.Credential(credStore),
 		Cache:      auth.NewCache(),
+	}
+	return repo, nil
+}
+
+// RemoteCatalog opens ref (e.g. "ghcr.io/org/cat:v2") as a read-only oras
+// target with docker-config credentials, returning the target and the
+// reference (tag or digest) to copy from.
+func RemoteCatalog(ref string) (oras.ReadOnlyTarget, string, error) {
+	repo, err := newRepository(ref)
+	if err != nil {
+		return nil, "", err
+	}
+	return repo, repo.Reference.Reference, nil
+}
+
+// RemoteCatalogRW opens ref as a writable oras target with the same
+// docker-config credentials as RemoteCatalog, for publishing a catalog.
+func RemoteCatalogRW(ref string) (oras.Target, string, error) {
+	repo, err := newRepository(ref)
+	if err != nil {
+		return nil, "", err
 	}
 	return repo, repo.Reference.Reference, nil
 }
