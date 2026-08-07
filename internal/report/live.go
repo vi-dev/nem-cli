@@ -66,6 +66,22 @@ func (c *Console) completeTask(t *task, printCompletion func()) {
 	c.repaintLocked()
 }
 
+// narrate runs print with the live block cleared, then repaints it, so a
+// narration line lands above the block instead of being interleaved into
+// cursor-controlled task lines. With no block active, print just runs
+// directly.
+func (c *Console) narrate(print func()) {
+	c.liveMu.Lock()
+	defer c.liveMu.Unlock()
+	if len(c.liveTasks) == 0 {
+		print()
+		return
+	}
+	c.clearBlockLocked()
+	print()
+	c.repaintLocked()
+}
+
 // repaint redraws the live block in place: clear the previously painted
 // lines, then write one line per active task in start order.
 func (c *Console) repaint() {

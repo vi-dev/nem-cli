@@ -149,7 +149,13 @@ func walk(ctx context.Context, sources []catalog.Named, name, version, catName, 
 
 // reconcile records name's contribution for platform, keeping the highest
 // of the versions seen so far and the source (catalog/digest/pkg) that
-// supplied it.
+// supplied it. Because higher only overwrites on a strictly greater
+// version, an equal-version contribution never replaces the current one:
+// when two sources resolve name to the same chosen version, the first one
+// reconciled keeps its Catalog/Digest/pkg attribution. Reconcile order
+// follows roots in tools order, with each root reconciled before its own
+// dependency subtree is walked, so a direct tool's pin outranks a
+// same-version dep discovered later.
 func reconcile(accs map[string]*acc, name, version, catName, digest string, pkg *spec.Package, platform spec.Platform) {
 	a, ok := accs[name]
 	if !ok {

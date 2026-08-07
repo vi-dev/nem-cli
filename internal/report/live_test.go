@@ -154,6 +154,40 @@ func TestLiveAutoElapsedAfterTenSeconds(t *testing.T) {
 	tk.Done("Built erlang v27.2")
 }
 
+func TestInfoDuringLiveBlockClearsPrintsAndRepaints(t *testing.T) {
+	c, _, errb := newLiveTest(Options{IsTTY: true, Color: ColorNever})
+	tk := c.Task("Installing go v1.26.5")
+	tk.Status("downloading")
+	c.repaint()
+	errb.Reset()
+
+	c.Info("Resolving catalog dev")
+
+	got := errb.String()
+	const wantClear = "\x1b[1A\x1b[J"
+	clearIdx := strings.Index(got, wantClear)
+	if clearIdx == -1 {
+		t.Fatalf("expected clear sequence %q before the info line, got %q", wantClear, got)
+	}
+	after := got[clearIdx+len(wantClear):]
+	infoIdx := strings.Index(after, "Resolving catalog dev")
+	if infoIdx == -1 {
+		t.Fatalf("info line missing after the clear sequence: %q", after)
+	}
+	repaintIdx := strings.Index(after, "Installing go v1.26.5")
+	if repaintIdx == -1 {
+		t.Fatalf("live block not repainted after the info line: %q", after)
+	}
+	if infoIdx > repaintIdx {
+		t.Errorf("info line should print above the repainted block: %q", after)
+	}
+	if !strings.Contains(after[infoIdx:repaintIdx], "\x1b[2K") {
+		t.Errorf("repaint after info missing clear-line sequence: %q", after)
+	}
+
+	tk.Done("Installed go v1.26.5")
+}
+
 func TestLiveBlockAbsentWhenNotTTY(t *testing.T) {
 	c, _, errb := newLiveTest(Options{IsTTY: false, Color: ColorNever})
 	tk := c.Task("Installing go v1.26.5")

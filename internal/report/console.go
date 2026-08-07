@@ -93,7 +93,7 @@ func (c *Console) Info(format string, a ...any) {
 	if c.opts.Quiet {
 		return
 	}
-	fmt.Fprintf(c.err, format+"\n", a...)
+	c.narrate(func() { fmt.Fprintf(c.err, format+"\n", a...) })
 }
 
 func (c *Console) Debug(format string, a ...any) {
@@ -117,29 +117,33 @@ func (c *Console) Success(format string, a ...any) {
 
 func (c *Console) Warn(format string, a ...any) {
 	msg := fmt.Sprintf(format, a...)
-	if c.colored {
-		fmt.Fprintf(c.err, "%s!%s %s\n", ansiYellow, ansiReset, msg)
-	} else {
-		fmt.Fprintf(c.err, "WARN %s\n", msg)
-	}
+	c.narrate(func() {
+		if c.colored {
+			fmt.Fprintf(c.err, "%s!%s %s\n", ansiYellow, ansiReset, msg)
+		} else {
+			fmt.Fprintf(c.err, "WARN %s\n", msg)
+		}
+	})
 }
 
 // Error renders err as a failure line plus an optional hint. Only the
 // displayed lead word is capitalized; the error value itself is unchanged.
 func (c *Console) Error(err error, hint string) {
 	msg := capitalizeLead(err.Error())
-	if c.colored {
-		fmt.Fprintf(c.err, "%s✗ %s%s\n", ansiRed, msg, ansiReset)
-	} else {
-		fmt.Fprintf(c.err, "ERROR %s\n", msg)
-	}
-	if hint != "" {
+	c.narrate(func() {
 		if c.colored {
-			fmt.Fprintf(c.err, "  %s→ %s%s\n", ansiDim, hint, ansiReset)
+			fmt.Fprintf(c.err, "%s✗ %s%s\n", ansiRed, msg, ansiReset)
 		} else {
-			fmt.Fprintf(c.err, "  hint: %s\n", hint)
+			fmt.Fprintf(c.err, "ERROR %s\n", msg)
 		}
-	}
+		if hint != "" {
+			if c.colored {
+				fmt.Fprintf(c.err, "  %s→ %s%s\n", ansiDim, hint, ansiReset)
+			} else {
+				fmt.Fprintf(c.err, "  hint: %s\n", hint)
+			}
+		}
+	})
 }
 
 // Hint prints a dim remediation line accompanying narration; suppressed by

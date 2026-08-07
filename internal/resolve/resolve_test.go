@@ -332,6 +332,80 @@ versions:
 	}
 }
 
+// TestResolveEqualVersionTieBreakFirstProcessedWins proves the deterministic
+// tie-break documented on reconcile: when a catalog-pinned direct tool and
+// an unprefixed dep both resolve "shared" to the same version, the direct
+// tool's attribution wins because roots are reconciled before their own
+// dependency subtree is walked. Swapping which tool is listed first flips
+// the winner, showing the rule tracks processing order rather than
+// favoring "direct" or a particular catalog.
+func TestResolveEqualVersionTieBreakFirstProcessedWins(t *testing.T) {
+	rootA := t.TempDir()
+	writePkg(t, rootA, `
+schema: 2
+name: shared
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	writePkg(t, rootA, `
+schema: 2
+name: consumer
+deps:
+  - name: shared
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	rootB := t.TempDir()
+	writePkg(t, rootB, `
+schema: 2
+name: shared
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	sources := []catalog.Named{
+		{Name: "a", Source: catalog.NewDir(rootA)},
+		{Name: "b", Source: catalog.NewDir(rootB)},
+	}
+
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Catalog: "b", Name: "shared"}, Version: "v1.0.0"},
+		{Key: project.ToolKey{Name: "consumer"}},
+	}
+	res, err := resolve.Resolve(context.Background(), tools, sources)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	shared := entry(t, res, "shared")
+	if shared.Version != "v1.0.0" || shared.Catalog != "b" {
+		t.Fatalf("want the catalog-pinned direct tool (catalog b) to win the tie, got %+v", shared)
+	}
+
+	toolsSwapped := []resolve.Tool{
+		{Key: project.ToolKey{Name: "consumer"}},
+		{Key: project.ToolKey{Catalog: "b", Name: "shared"}, Version: "v1.0.0"},
+	}
+	resSwapped, err := resolve.Resolve(context.Background(), toolsSwapped, sources)
+	if err != nil {
+		t.Fatalf("Resolve (swapped): %v", err)
+	}
+	sharedSwapped := entry(t, resSwapped, "shared")
+	if sharedSwapped.Catalog != "a" {
+		t.Fatalf("swapping tool order should flip the tie's winner to catalog a, got %+v", sharedSwapped)
+	}
+}
+
 func TestResolveCycleTerminates(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `

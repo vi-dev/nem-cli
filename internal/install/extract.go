@@ -3,6 +3,7 @@ package install
 import (
 	"archive/tar"
 	"archive/zip"
+	"bufio"
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
@@ -37,45 +38,63 @@ var (
 // recognize an uncompressed tar stream.
 const tarMagicOffset = 257
 
-// extract sniffs artifactPath's format by magic bytes and unpacks it into
-// root, dropping strip leading path components from every entry.
+// sniffLen covers the ustar magic at tarMagicOffset, the deepest sniff any
+// format needs; it's well within bufio.Reader's default 4096-byte buffer.
+const sniffLen = tarMagicOffset + len("ustar")
+
+// extract sniffs artifactPath's format by magic bytes and streams it into
+// root, dropping strip leading path components from every entry. The
+// artifact is opened once and never fully buffered: sniffing peeks the
+// leading bytes through a bufio.Reader, and every format decodes straight
+// from that same reader (or, for zip, seeks the underlying file directly).
 func extract(artifactPath string, root *os.Root, strip int) error {
-	data, err := os.ReadFile(artifactPath)
+	f, err := os.Open(artifactPath)
 	if err != nil {
+		return fmt.Errorf("open artifact: %w", err)
+	}
+	defer f.Close()
+
+	br := bufio.NewReader(f)
+	peek, err := br.Peek(sniffLen)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, bufio.ErrBufferFull) {
 		return fmt.Errorf("read artifact: %w", err)
 	}
 
 	switch {
-	case bytes.HasPrefix(data, gzipMagic):
-		gr, err := gzip.NewReader(bytes.NewReader(data))
+	case bytes.HasPrefix(peek, gzipMagic):
+		gr, err := gzip.NewReader(br)
 		if err != nil {
 			return fmt.Errorf("open gzip stream: %w", err)
 		}
 		defer gr.Close()
 		return extractTar(tar.NewReader(gr), root, strip)
-	case bytes.HasPrefix(data, xzMagic):
-		xr, err := xz.NewReader(bytes.NewReader(data))
+	case bytes.HasPrefix(peek, xzMagic):
+		xr, err := xz.NewReader(br)
 		if err != nil {
 			return fmt.Errorf("open xz stream: %w", err)
 		}
 		return extractTar(tar.NewReader(xr), root, strip)
-	case bytes.HasPrefix(data, zstdMagic):
-		zr, err := zstd.NewReader(bytes.NewReader(data))
+	case bytes.HasPrefix(peek, zstdMagic):
+		zr, err := zstd.NewReader(br)
 		if err != nil {
 			return fmt.Errorf("open zstd stream: %w", err)
 		}
 		defer zr.Close()
 		return extractTar(tar.NewReader(zr), root, strip)
-	case bytes.HasPrefix(data, bzip2Magic):
-		return extractTar(tar.NewReader(bzip2.NewReader(bytes.NewReader(data))), root, strip)
-	case isZip(data):
-		zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	case bytes.HasPrefix(peek, bzip2Magic):
+		return extractTar(tar.NewReader(bzip2.NewReader(br)), root, strip)
+	case isZip(peek):
+		info, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("stat artifact: %w", err)
+		}
+		zr, err := zip.NewReader(f, info.Size())
 		if err != nil {
 			return fmt.Errorf("open zip archive: %w", err)
 		}
 		return extractZip(zr, root, strip)
-	case isPlainTar(data):
-		return extractTar(tar.NewReader(bytes.NewReader(data)), root, strip)
+	case isPlainTar(peek):
+		return extractTar(tar.NewReader(br), root, strip)
 	default:
 		return errors.New("unrecognized archive format")
 	}

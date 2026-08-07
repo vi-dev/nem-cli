@@ -5,7 +5,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/sha256"
 	"encoding/base64"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
@@ -724,5 +726,59 @@ func TestRunActionsExtractNegativeStripNoPanic(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(staging, "a", "b", "file"))
 	if err != nil || string(got) != "x" {
 		t.Fatalf("a/b/file = %q, %v, want %q", got, err, "x")
+	}
+}
+
+// TestRunActionsExtractLargeTarGzStreams builds a several-megabyte tar.gz
+// fixture and extracts it, exercising the streaming decode path: gzip
+// wrapped over the buffered sniff reader, tar entries copied straight to
+// disk one at a time rather than the whole artifact sitting in a []byte.
+func TestRunActionsExtractLargeTarGzStreams(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	payload := make([]byte, 5<<20)
+	if _, err := rng.Read(payload); err != nil {
+		t.Fatalf("fill payload: %v", err)
+	}
+	want := sha256.Sum256(payload)
+
+	archive := gzipBytes(t, buildTar(t, []tarEntry{
+		{name: "big.bin", content: payload, mode: 0o644},
+		{name: "small.txt", content: []byte("small"), mode: 0o644},
+	}))
+
+	tmp := t.TempDir()
+	staging := filepath.Join(tmp, "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	artifact := writeArtifact(t, tmp, archive)
+
+	if err := install.RunActions(extractPkg(0), staging, artifact); err != nil {
+		t.Fatalf("RunActions: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(staging, "big.bin"))
+	if err != nil {
+		t.Fatalf("read big.bin: %v", err)
+	}
+	if sha256.Sum256(got) != want {
+		t.Fatal("big.bin content mismatch after extraction")
+	}
+	small, err := os.ReadFile(filepath.Join(staging, "small.txt"))
+	if err != nil || string(small) != "small" {
+		t.Fatalf("small.txt = %q, %v, want %q", small, err, "small")
+	}
+}
+
+// TestExtractSourceStreamsArtifact keeps the point of this refactor
+// enforced at the source level: extract.go must sniff and decode the
+// artifact through a reader, never read it whole into a []byte first.
+func TestExtractSourceStreamsArtifact(t *testing.T) {
+	src, err := os.ReadFile("extract.go")
+	if err != nil {
+		t.Fatalf("read extract.go: %v", err)
+	}
+	if bytes.Contains(src, []byte("os.ReadFile")) {
+		t.Fatal("extract.go calls os.ReadFile; the artifact must be streamed, not buffered whole")
 	}
 }

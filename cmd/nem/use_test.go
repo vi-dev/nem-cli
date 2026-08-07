@@ -4,15 +4,24 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/content/oci"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/home"
@@ -20,7 +29,39 @@ import (
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/resolve"
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
+
+// stubSyncEmptyCatalog writes a schema-valid, empty catalog straight into
+// storePath without touching a network. It is the default syncCatalogStore
+// for this whole test binary (see TestMain): use's cold auto-sync runs
+// ahead of every resolution, and most tests here never mean to reach a
+// real registry just because a default catalog happens to be unsynced.
+func stubSyncEmptyCatalog(ctx context.Context, ref, storePath string) error {
+	dst, err := oci.New(storePath)
+	if err != nil {
+		return err
+	}
+	idx := ocispec.Index{
+		Versioned:   specs.Versioned{SchemaVersion: 2},
+		MediaType:   ocispec.MediaTypeImageIndex,
+		Annotations: map[string]string{ocix.AnnotationSchemaVersion: ocix.SchemaVersion},
+	}
+	data, err := json.Marshal(idx)
+	if err != nil {
+		return err
+	}
+	desc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageIndex, data)
+	if err := dst.Push(ctx, desc, bytes.NewReader(data)); err != nil {
+		return err
+	}
+	return dst.Tag(ctx, desc, ocix.LocalTag)
+}
+
+func TestMain(m *testing.M) {
+	syncCatalogStore = stubSyncEmptyCatalog
+	os.Exit(m.Run())
+}
 
 // chdir switches the process cwd to dir for the duration of t.
 func chdir(t *testing.T, dir string) {
@@ -252,22 +293,172 @@ func TestUnuseUnknownErrors(t *testing.T) {
 	}
 }
 
-func TestUseErrNotSyncedHintWiring(t *testing.T) {
+// otherPlatform returns a supported platform other than the one the test
+// runs on, so a resolved tool never reaches install (which would otherwise
+// need a real registry or download target).
+func otherPlatform(t *testing.T) spec.Platform {
+	t.Helper()
+	for _, p := range spec.Supported {
+		if p != spec.Current() {
+			return p
+		}
+	}
+	t.Fatal("no alternate supported platform available")
+	return spec.Platform{}
+}
+
+// fakeOCICatalogSync returns a syncCatalogStore replacement that records
+// each ref+storePath it's called with and syncs a fake catalog holding a
+// single "tool" package (restricted to plat) into storePath, bypassing any
+// real registry.
+func fakeOCICatalogSync(t *testing.T, calls *[]string, plat spec.Platform) func(ctx context.Context, ref, storePath string) error {
+	t.Helper()
+	yaml := fmt.Sprintf(`
+schema: 2
+name: tool
+platforms: [%s]
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`, plat)
+	return func(ctx context.Context, ref, storePath string) error {
+		*calls = append(*calls, ref+"|"+storePath)
+		src, err := oci.New(t.TempDir())
+		if err != nil {
+			return err
+		}
+		ocix.PushFakeCatalogForTest(t, src, []ocix.FakeEntry{{
+			Name: "tool", Description: "a test tool", Latest: "v1.0.0",
+			YAML: []byte(yaml),
+		}}, "2")
+		_, err = ocix.SyncFrom(ctx, src, "v2", storePath)
+		return err
+	}
+}
+
+func TestUseColdAutoSyncsUnsyncedOCICatalogBeforeResolve(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := testNemHome(nemHomeDir)
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if _, errb, err := runNem(t, nemHomeDir, "catalog", "add", "demo", "ghcr.io/x/y:v2"); err != nil {
+		t.Fatalf("catalog add: %v\n%s", err, errb)
+	}
+	store, err := h.CatalogStore("demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(store); !os.IsNotExist(err) {
+		t.Fatal("setup broken: catalog store must not exist before the first use")
+	}
+
+	var calls []string
+	orig := syncCatalogStore
+	syncCatalogStore = fakeOCICatalogSync(t, &calls, otherPlatform(t))
+	defer func() { syncCatalogStore = orig }()
+
+	_, errb, err := runNem(t, nemHomeDir, "use", "demo:tool")
+	if err != nil {
+		t.Fatalf("use: %v\n%s", err, errb)
+	}
+	// The default "official" catalog is also unsynced in a fresh nemHome,
+	// so it's synced too; what this test proves is that "demo" — the
+	// fixture whose store dir didn't exist yet — is among the catalogs
+	// use synced before resolving.
+	wantDemoCall := "ghcr.io/x/y:v2|" + store
+	if !slices.Contains(calls, wantDemoCall) {
+		t.Fatalf("syncCatalogStore not called for the unsynced demo catalog: %v", calls)
+	}
+
+	// cold-only: a store that's already synced (even from a previous use)
+	// must never be re-synced.
+	calls = nil
+	if _, errb, err := runNem(t, nemHomeDir, "use", "demo:tool"); err != nil {
+		t.Fatalf("second use: %v\n%s", err, errb)
+	}
+	if len(calls) != 0 {
+		t.Fatalf("already-synced stores must not be re-synced, got calls %v", calls)
+	}
+}
+
+// TestUseColdAutoSyncFailureDoesNotAbortWhenToolResolvesElsewhere covers the
+// fresh-machine scenario: a cold oci catalog that fails to sync (e.g. the
+// default "official" catalog before it's published) must not stop a `use`
+// pinned to a package another catalog already provides.
+func TestUseColdAutoSyncFailureDoesNotAbortWhenToolResolvesElsewhere(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	catalogRoot := downloadableDirCatalog(t)
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "cold", "ghcr.io/x/y:v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "dir", catalogRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := syncCatalogStore
+	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+		return errors.New("network unreachable")
+	}
+	defer func() { syncCatalogStore = orig }()
+
+	out, errb, err := runNem(t, nemHomeDir, "use", "dir:tool")
+	if err != nil {
+		t.Fatalf("use: %v\nstdout: %s\nstderr: %s", err, out, errb)
+	}
+	if !strings.Contains(errb, "Could not sync catalog cold") {
+		t.Fatalf("stderr should warn about the cold catalog's sync failure: %q", errb)
+	}
+	if !strings.Contains(errb, "Installed tool v1.0.0") {
+		t.Fatalf("use should still resolve and install from the dir catalog: %q", errb)
+	}
+	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); err != nil {
+		t.Fatalf("nem.toml should be written when use succeeds: %v", err)
+	}
+}
+
+// TestUseColdAutoSyncFailureSurfacesAtResolveWhenToolOnlyThere covers the
+// other half: when the package really does live only in the catalog that
+// failed to sync, use must still fail, but with the not-synced error and
+// hint from resolution, not the raw sync error.
+func TestUseColdAutoSyncFailureSurfacesAtResolveWhenToolOnlyThere(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
-	// No catalog has been added: OpenConfig writes the default "official"
-	// oci catalog, which has never been synced.
-	_, errb, err := runNem(t, nemHomeDir, "use", "anything")
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "cold", "ghcr.io/x/y:v2"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantSyncErr := errors.New("network unreachable")
+	orig := syncCatalogStore
+	syncCatalogStore = func(ctx context.Context, ref, storePath string) error { return wantSyncErr }
+	defer func() { syncCatalogStore = orig }()
+
+	_, errb, err := runNem(t, nemHomeDir, "use", "cold:tool")
 	if err == nil {
-		t.Fatal("want error: official catalog is not synced")
+		t.Fatal("want error when the only catalog holding the tool never synced")
 	}
 	if !errors.Is(err, ocix.ErrNotSynced) {
-		t.Fatalf("want ocix.ErrNotSynced, got %v", err)
+		t.Fatalf("want ErrNotSynced from resolution, got %v", err)
+	}
+	if errors.Is(err, wantSyncErr) {
+		t.Fatalf("use's error should come from resolution, not the sync failure: %v", err)
+	}
+	if !strings.Contains(errb, "Could not sync catalog cold") {
+		t.Fatalf("stderr should still warn about the failed sync: %q", errb)
 	}
 	if !strings.Contains(errb, "nem catalog update") {
-		t.Fatalf("stderr should carry the ErrNotSynced hint: %q", errb)
+		t.Fatalf("stderr should carry the not-synced hint: %q", errb)
+	}
+	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); !os.IsNotExist(err) {
+		t.Fatal("nem.toml must not be written when resolution fails")
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -14,10 +15,23 @@ import (
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/install"
+	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/resolve"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
+
+// syncCatalogStore syncs an oci catalog's local mirror from ref into
+// storePath; a package var so tests can override it without a real
+// registry.
+var syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+	src, srcRef, err := ocix.RemoteCatalog(ref)
+	if err != nil {
+		return err
+	}
+	_, err = ocix.SyncFrom(ctx, src, srcRef, storePath)
+	return err
+}
 
 func newUseCmd() *cobra.Command {
 	var global bool
@@ -150,6 +164,44 @@ func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.
 	return jobs
 }
 
+// autoSyncUnsyncedCatalogs syncs every configured oci catalog whose local
+// mirror has never been synced, so a first `use` right after `catalog add`
+// resolves without a separate `catalog update` step. A store that already
+// exists is left untouched even if stale — resyncing an existing mirror is
+// `catalog update`'s job, not use's.
+//
+// A sync failure is best-effort: it's warned about and use moves on to the
+// next catalog rather than aborting. If the failed catalog turns out to be
+// needed for resolution, catalog.Lookup surfaces ocix.ErrNotSynced for it
+// there, with the usual "nem catalog update" hint; if it wasn't needed, the
+// failure never mattered.
+func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config) error {
+	for _, e := range cfg.Catalogs {
+		if e.Type != "oci" {
+			continue
+		}
+		store, err := nemHome.CatalogStore(e.Name)
+		if err != nil {
+			return err
+		}
+		_, err = ocix.LoadIndex(ctx, store)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, ocix.ErrNotSynced) {
+			return err
+		}
+		task := console.Task("Syncing catalog " + e.Name)
+		if err := syncCatalogStore(ctx, e.Ref, store); err != nil {
+			task.Fail(err.Error())
+			console.Warn("Could not sync catalog %s: %v", e.Name, err)
+			continue
+		}
+		task.Done("Synced catalog " + e.Name)
+	}
+	return nil
+}
+
 func runUse(cmd *cobra.Command, args []string, global bool) error {
 	parsedArgs := make([]useArg, len(args))
 	for i, a := range args {
@@ -172,6 +224,11 @@ func runUse(cmd *cobra.Command, args []string, global bool) error {
 	}
 	manifest, cfg, sources, err := loadUseState(path)
 	if err != nil {
+		release()
+		return err
+	}
+
+	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg); err != nil {
 		release()
 		return err
 	}
