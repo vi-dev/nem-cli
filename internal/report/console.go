@@ -1,12 +1,18 @@
-// Package report renders all user-facing output. Domain packages talk to a
-// Console (later: the Reporter seam); nothing else writes to the terminal.
+// Package report renders all user-facing output — narration, diagnostics,
+// tables, and live task progress — that domain packages emit through the
+// Reporter interface.
 package report
 
 import (
 	"fmt"
 	"io"
+	"os"
 	"strings"
+	"sync"
+	"time"
 	"unicode"
+
+	"golang.org/x/term"
 )
 
 type Mode int
@@ -28,11 +34,49 @@ type Console struct {
 	out, err io.Writer
 	opts     Options
 	colored  bool
+
+	// now is the clock Task uses to time itself; overridable in tests
+	// (same package only) to make duration math deterministic.
+	now func() time.Time
+
+	// width reports the terminal width the live block truncates to;
+	// overridable in tests (same package only) to avoid depending on a
+	// real terminal.
+	width func() int
+
+	// tick is the live block's redraw interval; overridable in tests
+	// (same package only) so the background ticker never fires during a
+	// test run.
+	tick time.Duration
+
+	liveMu    sync.Mutex
+	liveTasks []*task
+	liveLines int
+	liveStop  chan struct{}
 }
 
 func New(stdout, stderr io.Writer, opts Options) *Console {
 	colored := opts.Color == ColorAlways || (opts.Color == ColorAuto && opts.IsTTY)
-	return &Console{out: stdout, err: stderr, opts: opts, colored: colored}
+	return &Console{
+		out:     stdout,
+		err:     stderr,
+		opts:    opts,
+		colored: colored,
+		now:     time.Now,
+		width:   terminalWidth,
+		tick:    liveTickInterval,
+	}
+}
+
+// terminalWidth reports stderr's terminal width, falling back to
+// defaultWidth when it can't be determined (not a terminal, or the ioctl
+// fails).
+func terminalWidth() int {
+	w, _, err := term.GetSize(int(os.Stderr.Fd()))
+	if err != nil || w <= 0 {
+		return defaultWidth
+	}
+	return w
 }
 
 func Discard() *Console { return New(io.Discard, io.Discard, Options{Color: ColorNever}) }

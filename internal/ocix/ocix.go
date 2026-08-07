@@ -10,6 +10,8 @@ import (
 const (
 	// MediaTypePkg is the media type of a pkg.yaml layer blob.
 	MediaTypePkg = "application/vnd.nem.pkg.v2+yaml"
+	// MediaTypeArchive is the media type of a package archive layer blob.
+	MediaTypeArchive = "application/vnd.nem.archive.v2"
 	// AnnotationSchemaVersion names the catalog index annotation carrying
 	// the nem catalog schema version.
 	AnnotationSchemaVersion = "org.vi-dev.nem.catalog.schemaVersion"
@@ -33,6 +35,11 @@ const (
 
 // ErrNotSynced indicates the local catalog store has not been synced yet.
 var ErrNotSynced = errors.New("catalog store not synced")
+
+// ErrArchiveNotFound indicates a package archive is not present in the
+// registry: the archives repo or tag does not exist, or a resolved index
+// has no manifest for the requested platform.
+var ErrArchiveNotFound = errors.New("archive not found in registry")
 
 // PkgNotInIndexError indicates a package name has no entry in the catalog
 // index.

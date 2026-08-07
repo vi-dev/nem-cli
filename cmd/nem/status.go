@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
 )
 
@@ -37,8 +38,10 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			locked := map[string]bool{}
+			lockedVersion := map[string]string{}
 			for _, e := range lock.Packages {
 				locked[e.Name+"@"+e.Version] = true
+				lockedVersion[e.Name] = e.Version
 			}
 
 			// project shadows global by package name
@@ -58,10 +61,17 @@ func newStatusCmd() *cobra.Command {
 					if locked[tool.Key.Name+"@"+tool.Version] {
 						lockedCell = "yes"
 					}
-					rows = append(rows, []string{tool.Key.Name, tool.Version, catalog, lockedCell})
+					installedCell := "-"
+					if lv, ok := lockedVersion[tool.Key.Name]; ok {
+						installedCell = "no"
+						if install.IsInstalled(nemHome, tool.Key.Name, lv) {
+							installedCell = "yes"
+						}
+					}
+					rows = append(rows, []string{tool.Key.Name, tool.Version, catalog, lockedCell, installedCell})
 				}
 			}
-			console.Table([]string{"package", "version", "catalog", "locked"}, rows)
+			console.Table([]string{"package", "version", "catalog", "locked", "installed"}, rows)
 
 			if len(proj.Env)+len(global.Env) > 0 {
 				envRows := [][]string{}

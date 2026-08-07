@@ -14,6 +14,7 @@ import (
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/ocix"
+	"github.com/vi-dev/nem-cli/internal/report"
 )
 
 // syncCatalog is swapped in tests; production uses the real remote.
@@ -71,6 +72,9 @@ func newCatalogAddCmd() *cobra.Command {
 				}
 				entry.Path = abs
 			case "oci":
+				if err := ocix.ValidateRef(ref); err != nil {
+					return err
+				}
 				entry.Ref = ref
 			default:
 				return fmt.Errorf("invalid --type %q (want oci or dir)", entryType)
@@ -137,7 +141,11 @@ func newCatalogRemoveCmd() *cobra.Command {
 			// Delete the mirror before the config entry: a missing mirror
 			// with a lingering entry is the normal not-synced state and
 			// self-heals on update, while the reverse orphans the mirror.
-			if err := os.RemoveAll(filepath.Join(nemHome.Root(), "catalogs", name)); err != nil {
+			dir, err := nemHome.CatalogDir(name)
+			if err != nil {
+				return err
+			}
+			if err := os.RemoveAll(dir); err != nil {
 				return err
 			}
 			cfg.Catalogs = slices.Delete(cfg.Catalogs, idx, idx+1)
@@ -191,11 +199,15 @@ func newCatalogUpdateCmd() *cobra.Command {
 }
 
 func syncOne(ctx context.Context, e catalog.Entry) error {
-	start := time.Now()
-	if _, err := syncCatalog(ctx, e.Ref, nemHome.CatalogStore(e.Name)); err != nil {
+	store, err := nemHome.CatalogStore(e.Name)
+	if err != nil {
 		return err
 	}
-	console.Success("Synced catalog %s%s", e.Name, durSuffix(time.Since(start)))
+	start := time.Now()
+	if _, err := syncCatalog(ctx, e.Ref, store); err != nil {
+		return err
+	}
+	console.Success("Synced catalog %s%s", e.Name, report.DurSuffix(time.Since(start)))
 	return nil
 }
 
@@ -224,19 +236,6 @@ func newCatalogReorderCmd() *cobra.Command {
 			return nil
 		},
 	}
-}
-
-// durSuffix renders the output convention's duration suffix: empty under 1s,
-// else e.g. " (3s)" or " (1m23s)".
-func durSuffix(d time.Duration) string {
-	if d < time.Second {
-		return ""
-	}
-	d = d.Round(time.Second)
-	if d < time.Minute {
-		return fmt.Sprintf(" (%ds)", int(d.Seconds()))
-	}
-	return fmt.Sprintf(" (%dm%02ds)", int(d.Minutes()), int(d.Seconds())%60)
 }
 
 func looksLikeDir(ref string) bool {

@@ -12,10 +12,26 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
+	"oras.land/oras-go/v2/registry"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
 )
+
+// ValidateRef checks that ref names a specific oci artifact via a tag or
+// digest. A bare repository reference (e.g. "ghcr.io/org/cat") resolves to
+// whatever the registry currently calls "latest", which is not something
+// nem should pin a catalog sync to implicitly.
+func ValidateRef(ref string) error {
+	parsed, err := registry.ParseReference(ref)
+	if err != nil {
+		return fmt.Errorf("parse oci ref %q: %w", ref, err)
+	}
+	if parsed.Reference == "" {
+		return fmt.Errorf("oci ref %q has no tag or digest", ref)
+	}
+	return nil
+}
 
 // RemoteCatalog opens ref (e.g. "ghcr.io/org/cat:v2") as a read-only oras
 // target with docker-config credentials, returning the target and the
@@ -41,9 +57,14 @@ func RemoteCatalog(ref string) (oras.ReadOnlyTarget, string, error) {
 //
 // The source index is fetched and schema-validated before anything is
 // written to storePath, so a bad-schema remote can never move the local
-// tag and clobber a previously-synced good mirror.
+// tag and clobber a previously-synced good mirror. After the copy, the
+// copied digest is checked against the validated one: srcRef could resolve
+// to different content between validation and oras.Copy's own re-resolve
+// (e.g. a moving tag updated mid-sync), and copying that drift in silently
+// would leave storePath tagged with content nem never schema-checked.
 func SyncFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef, storePath string) (string, error) {
-	if err := validateSrcSchema(ctx, src, srcRef); err != nil {
+	validated, err := validateSrcSchema(ctx, src, srcRef)
+	if err != nil {
 		return "", err
 	}
 
@@ -53,29 +74,37 @@ func SyncFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef, storePath st
 	}
 	opts := oras.DefaultCopyOptions
 	opts.Concurrency = syncConcurrency
-	desc, err := oras.Copy(ctx, src, srcRef, dst, LocalTag, opts)
+	copied, err := oras.Copy(ctx, src, srcRef, dst, LocalTag, opts)
 	if err != nil {
 		return "", fmt.Errorf("sync catalog: %w", err)
 	}
-	return desc.Digest.String(), nil
+	if copied.Digest != validated.Digest {
+		return "", errors.New("catalog changed during sync; retry")
+	}
+	return copied.Digest.String(), nil
 }
 
 // validateSrcSchema resolves srcRef on src, fetches the index bytes, and
-// checks the catalog schema version, without touching any local state.
-func validateSrcSchema(ctx context.Context, src oras.ReadOnlyTarget, srcRef string) error {
+// checks the catalog schema version, without touching any local state. It
+// returns the resolved descriptor so the caller can verify the digest
+// actually copied still matches what was validated.
+func validateSrcSchema(ctx context.Context, src oras.ReadOnlyTarget, srcRef string) (ocispec.Descriptor, error) {
 	desc, err := src.Resolve(ctx, srcRef)
 	if err != nil {
-		return fmt.Errorf("resolve catalog ref %s: %w", srcRef, err)
+		return ocispec.Descriptor{}, fmt.Errorf("resolve catalog ref %s: %w", srcRef, err)
 	}
 	data, err := content.FetchAll(ctx, src, desc)
 	if err != nil {
-		return fmt.Errorf("read catalog index: %w", err)
+		return ocispec.Descriptor{}, fmt.Errorf("read catalog index: %w", err)
 	}
 	var idx ocispec.Index
 	if err := json.Unmarshal(data, &idx); err != nil {
-		return fmt.Errorf("parse catalog index: %w", err)
+		return ocispec.Descriptor{}, fmt.Errorf("parse catalog index: %w", err)
 	}
-	return validateSchema(idx)
+	if err := validateSchema(idx); err != nil {
+		return ocispec.Descriptor{}, err
+	}
+	return desc, nil
 }
 
 // validateSchema checks idx carries the catalog schema version this build

@@ -59,7 +59,7 @@ func newRoot() *cobra.Command {
 	//    so those failures exit 1 (runtime), not 2 (usage).
 	//  - a subcommand defining its own PersistentPreRunE REPLACES this root
 	//    hook — console/nemHome would stay nil. Don't do that.
-	root.AddCommand(newVersionCmd(), newStatusCmd(), newCatalogCmd())
+	root.AddCommand(newVersionCmd(), newStatusCmd(), newCatalogCmd(), newUseCmd(), newUnuseCmd(), newSyncCmd())
 	return root
 }
 

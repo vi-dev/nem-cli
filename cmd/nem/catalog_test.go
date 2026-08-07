@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
 )
@@ -21,6 +20,11 @@ func runNem(t *testing.T, nemHomeDir string, args ...string) (string, string, er
 	root.SetErr(&errb)
 	root.SetArgs(append(args, "--color", "never"))
 	err := root.Execute()
+	if err != nil && ranHook && console != nil {
+		// Mirror main()'s own error rendering so tests can assert on the
+		// hint wiring through stderr, the same as a real invocation.
+		console.Error(err, hintFor(err))
+	}
 	return out.String(), errb.String(), err
 }
 
@@ -90,6 +94,17 @@ func TestCatalogAddTypeDetection(t *testing.T) {
 	}
 }
 
+func TestCatalogAddRejectsTaglessOCIRef(t *testing.T) {
+	nemHome := t.TempDir()
+	if _, _, err := runNem(t, nemHome, "catalog", "add", "o", "ghcr.io/x/y"); err == nil {
+		t.Fatal("tagless oci ref must be rejected")
+	}
+	out, _, _ := runNem(t, nemHome, "catalog", "list")
+	if strings.Contains(out, "ghcr.io/x/y") {
+		t.Fatalf("rejected catalog must not be persisted:\n%s", out)
+	}
+}
+
 func TestCatalogUpdateSyncsOCI(t *testing.T) {
 	nemHome := t.TempDir()
 	var synced []string
@@ -140,21 +155,5 @@ func TestCatalogReorder(t *testing.T) {
 	}
 	if _, _, err := runNem(t, nemHome, "catalog", "reorder", "dev"); err == nil {
 		t.Fatal("partial reorder must fail")
-	}
-}
-
-func TestDurSuffix(t *testing.T) {
-	cases := []struct {
-		d    time.Duration
-		want string
-	}{
-		{500 * time.Millisecond, ""},
-		{3 * time.Second, " (3s)"},
-		{83 * time.Second, " (1m23s)"},
-	}
-	for _, c := range cases {
-		if got := durSuffix(c.d); got != c.want {
-			t.Errorf("durSuffix(%v) = %q, want %q", c.d, got, c.want)
-		}
 	}
 }

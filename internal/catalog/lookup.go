@@ -10,17 +10,21 @@ import (
 )
 
 // Open builds a Source per configured catalog, in config (precedence) order.
-func Open(cfg *Config, h home.Home) []Named {
+func Open(cfg *Config, h home.Home) ([]Named, error) {
 	out := make([]Named, 0, len(cfg.Catalogs))
 	for _, e := range cfg.Catalogs {
 		switch e.Type {
 		case "dir":
 			out = append(out, Named{Name: e.Name, Source: NewDir(e.Path)})
 		case "oci":
-			out = append(out, Named{Name: e.Name, Source: NewOCI(e.Name, h.CatalogStore(e.Name))})
+			store, err := h.CatalogStore(e.Name)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Named{Name: e.Name, Source: NewOCI(e.Name, store)})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // Lookup resolves a tool key against the configured catalogs.

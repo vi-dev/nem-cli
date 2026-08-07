@@ -9,7 +9,7 @@ func main() {
 	root := newRoot()
 	if err := root.Execute(); err != nil {
 		if ranHook && console != nil {
-			console.Error(err, "")
+			console.Error(err, hintFor(err))
 			os.Exit(1)
 		}
 		fmt.Fprintln(os.Stderr, "Error:", err)

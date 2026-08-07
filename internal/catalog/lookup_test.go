@@ -55,7 +55,10 @@ func TestOpenBuildsSourcesInOrder(t *testing.T) {
 		{Name: "dev", Type: "dir", Path: t.TempDir()},
 		{Name: "official", Type: "oci", Ref: OfficialRef},
 	}}
-	named := Open(cfg, h)
+	named, err := Open(cfg, h)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
 	if len(named) != 2 || named[0].Name != "dev" || named[1].Name != "official" {
 		t.Fatalf("Open: %+v", named)
 	}

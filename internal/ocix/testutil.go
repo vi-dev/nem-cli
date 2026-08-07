@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/opencontainers/image-spec/specs-go"
@@ -79,6 +81,66 @@ func PushFakeCatalogForTest(t *testing.T, store oras.Target, entries []FakeEntry
 		t.Fatalf("tag fake catalog index: %v", err)
 	}
 	return idxDesc
+}
+
+// PushFakeArchive builds a multi-platform archive image (one image manifest
+// per platform, each wrapping a single MediaTypeArchive layer, referenced
+// from an image index carrying a platform descriptor per manifest) and
+// pushes it into store, tagging the resulting index tag. platforms keys are
+// "os/arch" strings; values are the per-platform archive payload.
+func PushFakeArchive(t *testing.T, store oras.Target, tag string, platforms map[string][]byte) {
+	t.Helper()
+	ctx := context.Background()
+
+	emptyConfig := ocispec.DescriptorEmptyJSON
+	pushFakeBlob(t, ctx, store, emptyConfig, []byte("{}"))
+
+	keys := make([]string, 0, len(platforms))
+	for k := range platforms {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	manifests := make([]ocispec.Descriptor, 0, len(keys))
+	for _, k := range keys {
+		osName, arch, _ := strings.Cut(k, "/")
+		payload := platforms[k]
+
+		layerDesc := content.NewDescriptorFromBytes(MediaTypeArchive, payload)
+		pushFakeBlob(t, ctx, store, layerDesc, payload)
+
+		manifest := ocispec.Manifest{
+			Versioned: specs.Versioned{SchemaVersion: 2},
+			MediaType: ocispec.MediaTypeImageManifest,
+			Config:    emptyConfig,
+			Layers:    []ocispec.Descriptor{layerDesc},
+		}
+		manifestBytes, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatalf("marshal archive manifest for %s: %v", k, err)
+		}
+		manifestDesc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, manifestBytes)
+		pushFakeBlob(t, ctx, store, manifestDesc, manifestBytes)
+
+		manifestDesc.Platform = &ocispec.Platform{OS: osName, Architecture: arch}
+		manifests = append(manifests, manifestDesc)
+	}
+
+	idx := ocispec.Index{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageIndex,
+		Manifests: manifests,
+	}
+	idxBytes, err := json.Marshal(idx)
+	if err != nil {
+		t.Fatalf("marshal archive index: %v", err)
+	}
+	idxDesc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageIndex, idxBytes)
+	pushFakeBlob(t, ctx, store, idxDesc, idxBytes)
+
+	if err := store.Tag(ctx, idxDesc, tag); err != nil {
+		t.Fatalf("tag fake archive index: %v", err)
+	}
 }
 
 func pushFakeBlob(t *testing.T, ctx context.Context, store oras.Target, desc ocispec.Descriptor, data []byte) {

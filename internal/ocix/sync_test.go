@@ -79,6 +79,27 @@ func TestLoadPkgBytesUnsynced(t *testing.T) {
 	}
 }
 
+func TestValidateRef(t *testing.T) {
+	cases := []struct {
+		ref string
+		ok  bool
+	}{
+		{"ghcr.io/x/y", false},
+		{"ghcr.io/x/y:v2", true},
+		{"ghcr.io/x/y@sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true},
+		{"not a ref", false},
+	}
+	for _, c := range cases {
+		err := ValidateRef(c.ref)
+		if c.ok && err != nil {
+			t.Errorf("ValidateRef(%q): unexpected error: %v", c.ref, err)
+		}
+		if !c.ok && err == nil {
+			t.Errorf("ValidateRef(%q): want error, got nil", c.ref)
+		}
+	}
+}
+
 func TestSyncIsIdempotent(t *testing.T) {
 	ctx := context.Background()
 	src, _ := oci.New(t.TempDir())

@@ -2,8 +2,10 @@
 package home
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 // Home is nem's state directory. Resolve it once at the edge (cmd) and pass
@@ -29,10 +31,47 @@ func (h Home) GlobalLock() string     { return filepath.Join(h.root, "nem.lock")
 func (h Home) LockFile() string       { return filepath.Join(h.root, "lock") }
 func (h Home) Tmp() string            { return filepath.Join(h.root, "tmp") }
 
-func (h Home) PackageDir(name, version string) string {
-	return filepath.Join(h.root, "packages", name, version)
+// segmentRE matches a single path segment safe to join under root: no
+// separator, and no leading dot (so ".." and hidden-file tricks are rejected
+// too, since a hidden segment is never a name nem itself generates).
+var segmentRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// safeSegment rejects a path segment that could escape its parent directory
+// or otherwise fall outside the names nem itself generates.
+func safeSegment(s string) error {
+	if !segmentRE.MatchString(s) {
+		return fmt.Errorf("invalid path segment %q", s)
+	}
+	return nil
 }
 
-func (h Home) CatalogStore(name string) string {
-	return filepath.Join(h.root, "catalogs", name, "store")
+// PackageDir returns the install directory for name at version, rejecting
+// either segment if it could escape $NEM_HOME/packages.
+func (h Home) PackageDir(name, version string) (string, error) {
+	if err := safeSegment(name); err != nil {
+		return "", err
+	}
+	if err := safeSegment(version); err != nil {
+		return "", err
+	}
+	return filepath.Join(h.root, "packages", name, version), nil
+}
+
+// CatalogStore returns the local OCI-layout mirror path for the named
+// catalog, rejecting a name that could escape $NEM_HOME/catalogs.
+func (h Home) CatalogStore(name string) (string, error) {
+	dir, err := h.CatalogDir(name)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "store"), nil
+}
+
+// CatalogDir returns $NEM_HOME/catalogs/<name>, rejecting a name that could
+// escape it.
+func (h Home) CatalogDir(name string) (string, error) {
+	if err := safeSegment(name); err != nil {
+		return "", err
+	}
+	return filepath.Join(h.root, "catalogs", name), nil
 }
