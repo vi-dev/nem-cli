@@ -16,14 +16,16 @@ var (
 	buildTime = "unknown"
 )
 
-var versionCmd = &cobra.Command{
-	Use:   "version",
-	Short: "Print the version of nem",
-	Args:  cobra.NoArgs,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		_, err := fmt.Fprint(cmd.OutOrStdout(), versionInfo())
-		return err
-	},
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the version of nem",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, err := fmt.Fprint(cmd.OutOrStdout(), versionInfo())
+			return err
+		},
+	}
 }
 
 func versionInfo() string {
@@ -53,8 +55,4 @@ func versionInfo() string {
 		fmt.Sprintf("Go: %s", goVersion),
 		fmt.Sprintf("Platform: %s/%s", runtime.GOOS, runtime.GOARCH),
 	}, "\n") + "\n"
-}
-
-func init() {
-	rootCmd.AddCommand(versionCmd)
 }

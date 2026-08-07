@@ -1,0 +1,70 @@
+package spec
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestArtifactURL(t *testing.T) {
+	p := valid() // from validate_test.go
+	p.Artifact.URL = "https://go.dev/dl/go{{.Version}}.{{.OS}}-{{.Arch}}.tar.gz"
+	got, err := p.ArtifactURL("1.26.5", Platform{"darwin", "arm64"})
+	if err != nil {
+		t.Fatalf("ArtifactURL: %v", err)
+	}
+	want := "https://go.dev/dl/go1.26.5.darwin-arm64.tar.gz"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestTemplateHelpers(t *testing.T) {
+	p := valid()
+	p.Artifact.URL = `https://x/{{trimPrefix .Version "v"}}/{{replace .OS "darwin" "macos"}}`
+	got, err := p.ArtifactURL("v1.0.0", Platform{"darwin", "arm64"})
+	if err != nil {
+		t.Fatalf("ArtifactURL: %v", err)
+	}
+	if got != "https://x/1.0.0/macos" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestTemplateUnknownKeyErrors(t *testing.T) {
+	p := valid()
+	p.Artifact.URL = "https://x/{{.Bogus}}"
+	if _, err := p.ArtifactURL("v1", Platform{"linux", "amd64"}); err == nil {
+		t.Fatal("want error for unknown template key")
+	}
+}
+
+func TestAssetName(t *testing.T) {
+	p := valid()
+	p.Artifact = Artifact{GitHub: &GitHubAsset{Repo: "golang/go", Asset: "go{{.Version}}.{{.OS}}-{{.Arch}}.tar.gz"}}
+	got, err := p.AssetName("1.26.5", Platform{"linux", "amd64"})
+	if err != nil || got != "go1.26.5.linux-amd64.tar.gz" {
+		t.Fatalf("AssetName: %q, %v", got, err)
+	}
+	p2 := valid() // url artifact, no github
+	if _, err := p2.AssetName("v1", Platform{"linux", "amd64"}); err == nil {
+		t.Fatal("want error when package has no github artifact")
+	}
+}
+
+func TestSha256Lookup(t *testing.T) {
+	p := valid()
+	got, err := p.Sha256("v1.0.0", Platform{"linux", "amd64"})
+	if err != nil || got != "d" {
+		t.Fatalf("Sha256: %q, %v", got, err)
+	}
+	if _, err := p.Sha256("v9.9.9", Platform{"linux", "amd64"}); err == nil ||
+		!strings.Contains(err.Error(), "v9.9.9") {
+		t.Fatalf("missing version: %v", err)
+	}
+	// Test missing platform in sha256 map
+	p.Versions[0].Sha256 = map[string]string{"linux/amd64": "d"}
+	if _, err := p.Sha256("v1.0.0", Platform{"darwin", "arm64"}); err == nil ||
+		!strings.Contains(err.Error(), "darwin/arm64") {
+		t.Fatalf("missing platform: %v", err)
+	}
+}
