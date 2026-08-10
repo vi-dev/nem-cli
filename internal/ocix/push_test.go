@@ -163,6 +163,9 @@ func TestPushPackageManifestDeterministicAndShaped(t *testing.T) {
 	if len(m.Annotations) != 0 {
 		t.Fatalf("manifest JSON must be annotation-free, got %v", m.Annotations)
 	}
+	if m.SchemaVersion != 2 {
+		t.Fatalf("manifest schemaVersion = %d, want 2", m.SchemaVersion)
+	}
 	if m.ArtifactType != MediaTypePkg {
 		t.Fatalf("artifactType = %q, want %q", m.ArtifactType, MediaTypePkg)
 	}

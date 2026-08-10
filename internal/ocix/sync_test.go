@@ -114,3 +114,25 @@ func TestSyncIsIdempotent(t *testing.T) {
 		t.Fatalf("resync: %q vs %q, %v", d1, d2, err)
 	}
 }
+
+func TestNewRemoteRepositoryPlainHTTP(t *testing.T) {
+	cases := []struct {
+		ref  string
+		want bool
+	}{
+		{"localhost:5001/nem-local-catalog:v2", true},
+		{"127.0.0.1:5000/cat:v2", true},
+		{"[::1]:5000/cat:v2", true},
+		{"ghcr.io/vi-dev/nem-official-catalog:v2", false},
+		{"192.168.1.10:5000/cat:v2", false},
+	}
+	for _, c := range cases {
+		repo, err := NewRemoteRepository(c.ref)
+		if err != nil {
+			t.Fatalf("NewRemoteRepository(%q): %v", c.ref, err)
+		}
+		if repo.PlainHTTP != c.want {
+			t.Errorf("NewRemoteRepository(%q).PlainHTTP = %v, want %v", c.ref, repo.PlainHTTP, c.want)
+		}
+	}
+}

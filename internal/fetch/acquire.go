@@ -16,9 +16,6 @@ import (
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
 	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 // Source tells Acquire where the package came from.
@@ -57,17 +54,9 @@ var remoteByRef = func(ctx context.Context, ref string, plat spec.Platform, dir 
 	if err != nil {
 		return "", fmt.Errorf("parse oci ref %q: %w", ref, err)
 	}
-	repo, err := remote.NewRepository(parsed.Registry + "/" + parsed.Repository)
+	repo, err := ocix.NewRemoteRepository(parsed.Registry + "/" + parsed.Repository)
 	if err != nil {
-		return "", fmt.Errorf("parse oci repository for %q: %w", ref, err)
-	}
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
-	if err != nil {
-		return "", fmt.Errorf("open docker credentials: %w", err)
-	}
-	repo.Client = &auth.Client{
-		Credential: credentials.Credential(credStore),
-		Cache:      auth.NewCache(),
+		return "", err
 	}
 	return ocix.PullArchiveFrom(ctx, repo, parsed.ReferenceOrDefault(), plat, dir)
 }

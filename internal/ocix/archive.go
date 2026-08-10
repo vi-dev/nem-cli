@@ -14,9 +14,6 @@ import (
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry"
-	"oras.land/oras-go/v2/registry/remote"
-	"oras.land/oras-go/v2/registry/remote/auth"
-	"oras.land/oras-go/v2/registry/remote/credentials"
 	"oras.land/oras-go/v2/registry/remote/errcode"
 )
 
@@ -38,19 +35,7 @@ func RemoteArchives(catalogRef, name string) (oras.ReadOnlyTarget, error) {
 	if err != nil {
 		return nil, err
 	}
-	repo, err := remote.NewRepository(archivesRef)
-	if err != nil {
-		return nil, fmt.Errorf("parse archives ref %q: %w", archivesRef, err)
-	}
-	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("open docker credentials: %w", err)
-	}
-	repo.Client = &auth.Client{
-		Credential: credentials.Credential(credStore),
-		Cache:      auth.NewCache(),
-	}
-	return repo, nil
+	return NewRemoteRepository(archivesRef)
 }
 
 // PullArchiveFrom resolves srcRef (a tag) on src, expecting a multi-platform

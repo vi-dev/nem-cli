@@ -29,6 +29,7 @@ func PushEmptyConfig(ctx context.Context, target oras.Target) error {
 func packageManifest(pkgBytes []byte) ([]byte, error) {
 	layer := content.NewDescriptorFromBytes(MediaTypePkg, pkgBytes)
 	man := ocispec.Manifest{
+		Versioned:    specs.Versioned{SchemaVersion: 2},
 		MediaType:    ocispec.MediaTypeImageManifest,
 		ArtifactType: MediaTypePkg,
 		Config:       ocispec.DescriptorEmptyJSON,

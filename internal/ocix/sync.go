@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -33,13 +35,32 @@ func ValidateRef(ref string) error {
 	return nil
 }
 
-// newRepository opens ref as a *remote.Repository with docker-config
-// credentials, shared by RemoteCatalog and RemoteCatalogRW.
-func newRepository(ref string) (*remote.Repository, error) {
+// loopbackRegistry reports whether host (the registry part of a parsed
+// reference, possibly with a port) names the local machine: "localhost"
+// or a loopback IP (127.0.0.0/8, ::1).
+func loopbackRegistry(host string) bool {
+	h := host
+	if hostOnly, _, err := net.SplitHostPort(host); err == nil {
+		h = hostOnly
+	}
+	h = strings.Trim(h, "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// NewRemoteRepository opens ref as a *remote.Repository with docker-config
+// credentials. Loopback registries (localhost, 127.0.0.0/8, ::1) are
+// contacted over plain HTTP so local development registries work without
+// TLS; every other host is HTTPS-only.
+func NewRemoteRepository(ref string) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
-		return nil, fmt.Errorf("parse catalog ref %q: %w", ref, err)
+		return nil, fmt.Errorf("parse oci ref %q: %w", ref, err)
 	}
+	repo.PlainHTTP = loopbackRegistry(repo.Reference.Registry)
 	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("open docker credentials: %w", err)
@@ -55,7 +76,7 @@ func newRepository(ref string) (*remote.Repository, error) {
 // target with docker-config credentials, returning the target and the
 // reference (tag or digest) to copy from.
 func RemoteCatalog(ref string) (oras.ReadOnlyTarget, string, error) {
-	repo, err := newRepository(ref)
+	repo, err := NewRemoteRepository(ref)
 	if err != nil {
 		return nil, "", err
 	}
@@ -65,7 +86,7 @@ func RemoteCatalog(ref string) (oras.ReadOnlyTarget, string, error) {
 // RemoteCatalogRW opens ref as a writable oras target with the same
 // docker-config credentials as RemoteCatalog, for publishing a catalog.
 func RemoteCatalogRW(ref string) (oras.Target, string, error) {
-	repo, err := newRepository(ref)
+	repo, err := NewRemoteRepository(ref)
 	if err != nil {
 		return nil, "", err
 	}
