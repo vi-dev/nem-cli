@@ -167,6 +167,85 @@ func TestCatalogUpdateSkipsDisabled(t *testing.T) {
 	}
 }
 
+func TestCatalogDisableEnable(t *testing.T) {
+	dir := t.TempDir()
+	catalogRoot := downloadableDirCatalog(t)
+	if _, _, err := runNem(t, dir, "catalog", "add", "tools", catalogRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, dir, "catalog", "disable", "tools"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	cfg, _ := catalog.OpenConfig(testNemHome(dir))
+	if e := cfg.Find("tools"); e == nil || !e.Disabled {
+		t.Fatalf("tools should be disabled, got %+v", e)
+	}
+	// Idempotent.
+	if _, _, err := runNem(t, dir, "catalog", "disable", "tools"); err != nil {
+		t.Fatalf("disable (idempotent): %v", err)
+	}
+	if _, _, err := runNem(t, dir, "catalog", "enable", "tools"); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	cfg, _ = catalog.OpenConfig(testNemHome(dir))
+	if e := cfg.Find("tools"); e == nil || e.Disabled {
+		t.Fatalf("tools should be enabled, got %+v", e)
+	}
+}
+
+func TestCatalogDisableUnknownNameErrors(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := runNem(t, dir, "catalog", "disable", "ghost"); err == nil {
+		t.Fatal("disabling an unknown catalog should error")
+	}
+}
+
+func TestCatalogListShowsStatus(t *testing.T) {
+	dir := t.TempDir()
+	h := testNemHome(dir)
+	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+		{Name: "on", Type: "dir", Path: "/tmp/on"},
+		{Name: "off", Type: "dir", Path: "/tmp/off", Disabled: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	out, _, err := runNem(t, dir, "catalog", "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.Contains(out, "disabled") || !strings.Contains(out, "enabled") {
+		t.Fatalf("list should show enabled/disabled status, got:\n%s", out)
+	}
+}
+
+func TestCatalogDisableMakesUseResolveElsewhere(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	rootA := downloadableDirCatalog(t)
+	rootB := downloadableDirCatalog(t)
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "a", rootA); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "b", rootB); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "disable", "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, err := runNem(t, nemHomeDir, "use", "b:tool"); err != nil {
+		t.Fatalf("use from enabled catalog b: %v\nstderr: %s", err, errb)
+	}
+	// Disabling both leaves the tool unresolvable.
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "disable", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, nemHomeDir, "use", "tool"); err == nil {
+		t.Fatal("use should fail when every catalog holding the tool is disabled")
+	}
+}
+
 func TestCatalogReorder(t *testing.T) {
 	nemHome := t.TempDir()
 	dir := t.TempDir()

@@ -31,7 +31,7 @@ func newCatalogCmd() *cobra.Command {
 		Use:   "catalog",
 		Short: "Manage catalogs",
 	}
-	cmd.AddCommand(newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogLintCmd(), newCatalogPublishCmd())
+	cmd.AddCommand(newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogLintCmd(), newCatalogPublishCmd(), newCatalogDisableCmd(), newCatalogEnableCmd())
 	return cmd
 }
 
@@ -110,9 +110,13 @@ func newCatalogListCmd() *cobra.Command {
 				if source == "" {
 					source = e.Path
 				}
-				rows = append(rows, []string{e.Name, e.Type, source})
+				status := "enabled"
+				if e.Disabled {
+					status = "disabled"
+				}
+				rows = append(rows, []string{e.Name, e.Type, source, status})
 			}
-			console.Table([]string{"name", "type", "source"}, rows)
+			console.Table([]string{"name", "type", "source", "status"}, rows)
 			return nil
 		},
 	}
@@ -243,6 +247,56 @@ func newCatalogReorderCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newCatalogDisableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "disable <name>...",
+		Short: "Disable configured catalogs",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, true) },
+	}
+}
+
+func newCatalogEnableCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "enable <name>...",
+		Short: "Enable configured catalogs",
+		Args:  cobra.MinimumNArgs(1),
+		RunE:  func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, false) },
+	}
+}
+
+func setCatalogsDisabled(names []string, disabled bool) error {
+	release, err := fsx.Lock(nemHome.LockFile())
+	if err != nil {
+		return err
+	}
+	defer release()
+	cfg, err := catalog.OpenConfig(nemHome)
+	if err != nil {
+		return err
+	}
+	// Resolve every name before mutating so an unknown name in the batch
+	// leaves the config file untouched.
+	for _, name := range names {
+		entry := cfg.Find(name)
+		if entry == nil {
+			return fmt.Errorf("catalog %s is not configured", name)
+		}
+		entry.Disabled = disabled
+	}
+	if err := catalog.SaveConfig(nemHome, cfg); err != nil {
+		return err
+	}
+	verb := "Disabled"
+	if !disabled {
+		verb = "Enabled"
+	}
+	for _, name := range names {
+		console.Success("%s catalog %s", verb, name)
+	}
+	return nil
 }
 
 func looksLikeDir(ref string) bool {
