@@ -246,6 +246,19 @@ func runUse(cmd *cobra.Command, args []string, global bool) error {
 		return err
 	}
 
+	// nem.toml records the exact resolved version for each used package, so a
+	// version-less `use <pkg>` pins the resolved version instead of leaving
+	// the manifest entry empty.
+	resolved := make(map[string]string, len(result.Entries))
+	for _, e := range result.Entries {
+		resolved[e.Name] = e.Version
+	}
+	for _, p := range parsedArgs {
+		if v, ok := resolved[p.Key.Name]; ok {
+			project.AddTool(manifest, p.Key, v)
+		}
+	}
+
 	if err := writeManifestAndLock(manifest, result); err != nil {
 		release()
 		return err

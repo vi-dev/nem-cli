@@ -174,10 +174,9 @@ func TestUseCreatesManifestLockAndInstalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadManifest: %v", err)
 	}
-	// "use demo:tool" (no @version) declares the latest version: the
-	// manifest records an empty version, and the lock below pins the
-	// resolved v1.0.0.
-	if len(m.Tools) != 1 || m.Tools[0].Key.String() != "demo:tool" || m.Tools[0].Version != "" {
+	// "use demo:tool" (no @version) resolves the latest and writes it
+	// exactly: the manifest pins the resolved v1.0.0, matching the lock.
+	if len(m.Tools) != 1 || m.Tools[0].Key.String() != "demo:tool" || m.Tools[0].Version != "v1.0.0" {
 		t.Fatalf("manifest tools: %+v", m.Tools)
 	}
 
