@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/vi-dev/nem-cli/internal/home"
+	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -48,17 +49,25 @@ func Lookup(ctx context.Context, sources []Named, key project.ToolKey) (*spec.Pa
 		return nil, "", "", &CatalogNotFoundError{Name: key.Catalog}
 	}
 	searched := make([]string, 0, len(sources))
+	var notSynced []string
 	for _, n := range sources {
 		searched = append(searched, n.Name)
 		pkg, dig, err := n.Source.Load(ctx, key.Name)
-		var nf *PackageNotFoundError
-		if errors.As(err, &nf) {
-			continue
-		}
 		if err != nil {
+			var nf *PackageNotFoundError
+			if errors.As(err, &nf) {
+				continue
+			}
+			if errors.Is(err, ocix.ErrNotSynced) {
+				notSynced = append(notSynced, n.Name)
+				continue
+			}
 			return nil, "", "", err
 		}
 		return pkg, n.Name, dig, nil
+	}
+	if len(notSynced) > 0 {
+		return nil, "", "", &CatalogNotSyncedError{Name: key.Name, Catalogs: notSynced}
 	}
 	return nil, "", "", &PackageNotFoundError{Name: key.Name, Catalogs: searched}
 }

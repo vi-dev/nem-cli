@@ -3,6 +3,8 @@ package catalog
 import (
 	"fmt"
 	"strings"
+
+	"github.com/vi-dev/nem-cli/internal/ocix"
 )
 
 type PackageNotFoundError struct {
@@ -13,6 +15,23 @@ type PackageNotFoundError struct {
 func (e *PackageNotFoundError) Error() string {
 	return fmt.Sprintf("package %s not found in catalog(s) %s", e.Name, strings.Join(e.Catalogs, ", "))
 }
+
+// CatalogNotSyncedError reports that a package could not be resolved
+// because it was found in no synced catalog, though one or more unsynced
+// catalogs were skipped during the search.
+type CatalogNotSyncedError struct {
+	Name     string
+	Catalogs []string
+}
+
+func (e *CatalogNotSyncedError) Error() string {
+	return fmt.Sprintf("%s not found; unsynced catalog(s): %s", e.Name, strings.Join(e.Catalogs, ", "))
+}
+
+// Unwrap makes errors.Is(err, ocix.ErrNotSynced) true, so callers get the
+// "nem catalog update" hint even though the error carries which catalogs
+// were skipped.
+func (e *CatalogNotSyncedError) Unwrap() error { return ocix.ErrNotSynced }
 
 type CatalogNotFoundError struct{ Name string }
 

@@ -462,6 +462,77 @@ func TestUseColdAutoSyncFailureSurfacesAtResolveWhenToolOnlyThere(t *testing.T) 
 	}
 }
 
+// TestUseColdAutoSyncFailureSkippedWhenToolResolvesInLaterCatalog covers the
+// unqualified first-match walk: a cold catalog that fails to sync and sits
+// ahead of the catalog holding the tool must be skipped, not abort
+// resolution.
+func TestUseColdAutoSyncFailureSkippedWhenToolResolvesInLaterCatalog(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	catalogRoot := downloadableDirCatalog(t)
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "cold", "ghcr.io/x/y:v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "dir", catalogRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := syncCatalogStore
+	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+		return errors.New("network unreachable")
+	}
+	defer func() { syncCatalogStore = orig }()
+
+	out, errb, err := runNem(t, nemHomeDir, "use", "tool")
+	if err != nil {
+		t.Fatalf("use: %v\nstdout: %s\nstderr: %s", err, out, errb)
+	}
+	if !strings.Contains(errb, "Could not sync catalog cold") {
+		t.Fatalf("stderr should warn about the cold catalog's sync failure: %q", errb)
+	}
+	if !strings.Contains(errb, "Installed tool v1.0.0") {
+		t.Fatalf("use should still resolve and install from the dir catalog: %q", errb)
+	}
+	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); err != nil {
+		t.Fatalf("nem.toml should be written when use succeeds: %v", err)
+	}
+}
+
+// TestUseUnqualifiedSurfacesNotSyncedWhenToolOnlyInUnsyncedCatalog covers the
+// unqualified first-match walk's exhaustion case: when every catalog that
+// could hold the tool failed to sync, use must fail with the not-synced
+// error rather than a plain not-found.
+func TestUseUnqualifiedSurfacesNotSyncedWhenToolOnlyInUnsyncedCatalog(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "cold", "ghcr.io/x/y:v2"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantSyncErr := errors.New("network unreachable")
+	orig := syncCatalogStore
+	syncCatalogStore = func(ctx context.Context, ref, storePath string) error { return wantSyncErr }
+	defer func() { syncCatalogStore = orig }()
+
+	_, errb, err := runNem(t, nemHomeDir, "use", "tool")
+	if err == nil {
+		t.Fatal("want error when the tool resolves in no synced catalog")
+	}
+	if !errors.Is(err, ocix.ErrNotSynced) {
+		t.Fatalf("want ErrNotSynced from resolution, got %v", err)
+	}
+	if !strings.Contains(errb, "nem catalog update") {
+		t.Fatalf("stderr should carry the not-synced hint: %q", errb)
+	}
+	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); !os.IsNotExist(err) {
+		t.Fatal("nem.toml must not be written when resolution fails")
+	}
+}
+
 func TestHintForTable(t *testing.T) {
 	cases := []struct {
 		name string
