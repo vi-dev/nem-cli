@@ -108,6 +108,80 @@ func TestStatusUnlockedToolShowsInstalledDash(t *testing.T) {
 	}
 }
 
+func TestStatusGlobalScopeWorksOutsideProject(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),
+		[]byte("[tools]\nhelm = \"v4.2.3\"\n\n[env]\nGLOBAL_VAR = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.lock"), []byte(
+		"# machine-written by nem — do not edit\nversion = 1\n\n[[package]]\nname = \"helm\"\nversion = \"v4.2.3\"\ncatalog = \"local\"\ndirect = true\nplatforms = [\"linux/amd64\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, t.TempDir()) // a directory with no nem.toml
+
+	out, errb, err := runNem(t, nemHomeDir, "status", "-g")
+	if err != nil {
+		t.Fatalf("status -g: %v\nstderr: %s", err, errb)
+	}
+	// helm row present, LOCKED=yes (checked against the GLOBAL lock), env shown.
+	var helmLine string
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if strings.HasPrefix(l, "helm ") {
+			helmLine = l
+		}
+	}
+	if helmLine == "" {
+		t.Fatalf("status -g missing helm row:\n%s", out)
+	}
+	f := strings.Fields(helmLine) // package version catalog locked installed
+	if f[1] != "v4.2.3" || f[3] != "yes" {
+		t.Fatalf("helm row = %q, want version v4.2.3 locked yes", helmLine)
+	}
+	if !strings.Contains(out, "GLOBAL_VAR") {
+		t.Fatalf("status -g missing global env var:\n%s", out)
+	}
+}
+
+func TestStatusScopesDoNotMerge(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),
+		[]byte("[tools]\nhelm = \"v4.2.3\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projDir, "nem.toml"),
+		[]byte("[tools]\ngo = \"v1.26.5\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, projDir)
+
+	hasRow := func(out, name string) bool {
+		for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+			if strings.HasPrefix(l, name+" ") {
+				return true
+			}
+		}
+		return false
+	}
+
+	outP, _, err := runNem(t, nemHomeDir, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRow(outP, "go") || hasRow(outP, "helm") {
+		t.Fatalf("project status should show go, not helm:\n%s", outP)
+	}
+
+	outG, _, err := runNem(t, nemHomeDir, "status", "-g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRow(outG, "helm") || hasRow(outG, "go") {
+		t.Fatalf("global status should show helm, not go:\n%s", outG)
+	}
+}
+
 func TestStatusNoManifestFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("NEM_HOME", filepath.Join(dir, "nemhome"))
