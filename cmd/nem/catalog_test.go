@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -138,6 +139,31 @@ func TestCatalogUpdateSyncsOCI(t *testing.T) {
 	// unknown errors
 	if _, _, err := runNem(t, nemHome, "catalog", "update", "ghost"); err == nil {
 		t.Fatal("unknown catalog must fail")
+	}
+}
+
+func TestCatalogUpdateSkipsDisabled(t *testing.T) {
+	dir := t.TempDir()
+	h := testNemHome(dir)
+	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+		{Name: "on", Type: "oci", Ref: "ghcr.io/x/on:v2"},
+		{Name: "off", Type: "oci", Ref: "ghcr.io/x/off:v2", Disabled: true},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var synced []string
+	orig := syncCatalog
+	syncCatalog = func(ctx context.Context, ref, storePath string) (string, error) {
+		synced = append(synced, ref)
+		return "", nil
+	}
+	defer func() { syncCatalog = orig }()
+
+	if _, _, err := runNem(t, dir, "catalog", "update"); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if !slices.Equal(synced, []string{"ghcr.io/x/on:v2"}) {
+		t.Fatalf("update should sync only enabled catalogs, synced %v", synced)
 	}
 }
 

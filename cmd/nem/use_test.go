@@ -533,6 +533,38 @@ func TestUseUnqualifiedSurfacesNotSyncedWhenToolOnlyInUnsyncedCatalog(t *testing
 	}
 }
 
+func TestUseIgnoresDisabledCatalog(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	catalogRoot := downloadableDirCatalog(t)
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	h := testNemHome(nemHomeDir)
+	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+		{Name: "off", Type: "oci", Ref: "ghcr.io/x/off:v2", Disabled: true},
+		{Name: "dir", Type: "dir", Path: catalogRoot},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var coldSynced []string
+	orig := syncCatalogStore
+	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+		coldSynced = append(coldSynced, ref)
+		return nil
+	}
+	defer func() { syncCatalogStore = orig }()
+
+	if _, errb, err := runNem(t, nemHomeDir, "use", "tool"); err != nil {
+		t.Fatalf("use: %v\nstderr: %s", err, errb)
+	}
+	if len(coldSynced) != 0 {
+		t.Fatalf("disabled catalog must not be cold-synced, got %v", coldSynced)
+	}
+	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); err != nil {
+		t.Fatalf("nem.toml should be written: %v", err)
+	}
+}
+
 func TestHintForTable(t *testing.T) {
 	cases := []struct {
 		name string

@@ -18,10 +18,11 @@ import (
 const OfficialRef = "ghcr.io/vi-dev/nem-official-catalog:v2"
 
 type Entry struct {
-	Name string `yaml:"name"`
-	Type string `yaml:"type"`
-	Ref  string `yaml:"ref,omitempty"`
-	Path string `yaml:"path,omitempty"`
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
+	Ref      string `yaml:"ref,omitempty"`
+	Path     string `yaml:"path,omitempty"`
+	Disabled bool   `yaml:"disabled,omitempty"`
 }
 
 type Config struct {

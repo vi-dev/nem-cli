@@ -183,9 +183,16 @@ func newCatalogUpdateCmd() *cobra.Command {
 					console.Warn("Catalog %s is a dir catalog (nothing to sync)", name)
 					return nil
 				}
+				if entry.Disabled {
+					console.Warn("Catalog %s is disabled (nothing to sync)", name)
+					return nil
+				}
 				return syncOne(cmd.Context(), *entry)
 			}
 			for _, e := range cfg.Catalogs {
+				if e.Disabled {
+					continue
+				}
 				if e.Type != "oci" {
 					continue
 				}

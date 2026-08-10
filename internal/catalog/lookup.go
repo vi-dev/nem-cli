@@ -14,6 +14,9 @@ import (
 func Open(cfg *Config, h home.Home) ([]Named, error) {
 	out := make([]Named, 0, len(cfg.Catalogs))
 	for _, e := range cfg.Catalogs {
+		if e.Disabled {
+			continue
+		}
 		switch e.Type {
 		case "dir":
 			out = append(out, Named{Name: e.Name, Source: NewDir(e.Path)})

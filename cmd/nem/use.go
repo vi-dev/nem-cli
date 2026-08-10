@@ -177,6 +177,9 @@ func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.
 // failure never mattered.
 func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config) error {
 	for _, e := range cfg.Catalogs {
+		if e.Disabled {
+			continue
+		}
 		if e.Type != "oci" {
 			continue
 		}

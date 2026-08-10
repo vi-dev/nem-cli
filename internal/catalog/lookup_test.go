@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/vi-dev/nem-cli/internal/project"
@@ -67,5 +68,24 @@ func TestOpenBuildsSourcesInOrder(t *testing.T) {
 	}
 	if _, ok := named[1].Source.(*OCI); !ok {
 		t.Fatal("official should be an OCI source")
+	}
+}
+
+func TestOpenSkipsDisabled(t *testing.T) {
+	cfg := &Config{Catalogs: []Entry{
+		{Name: "a", Type: "dir", Path: "/tmp/a"},
+		{Name: "b", Type: "dir", Path: "/tmp/b", Disabled: true},
+		{Name: "c", Type: "dir", Path: "/tmp/c"},
+	}}
+	named, err := Open(cfg, testHome(t))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got := make([]string, len(named))
+	for i, n := range named {
+		got[i] = n.Name
+	}
+	if !slices.Equal(got, []string{"a", "c"}) {
+		t.Fatalf("Open should skip disabled and preserve order, got %v", got)
 	}
 }
