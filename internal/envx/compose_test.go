@@ -433,7 +433,7 @@ func TestComposeKegOnlyLinkDepLibsNotOnPath(t *testing.T) {
 	appBin, _ := h.PackageDir("app", "1.0.0")
 	opensslBin, _ := h.PackageDir("openssl", "3.4.0")
 	if len(result.Path) != 1 || result.Path[0] != filepath.Join(appBin, "bin") {
-		t.Fatalf("Path = %v, want only app/bin (openssl bins must be keg-only)", result.Path)
+		t.Fatalf("Path = %v, want only app/bin (openssl bins must stay off PATH as a link-only dep)", result.Path)
 	}
 	if len(result.LoaderPath) != 1 || result.LoaderPath[0] != filepath.Join(opensslBin, "lib") {
 		t.Fatalf("LoaderPath = %v, want [openssl/lib]", result.LoaderPath)

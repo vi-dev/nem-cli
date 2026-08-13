@@ -134,8 +134,8 @@ func resolveEntries(entries []project.LockEntry, metaLookup func(name, version s
 // buildPath assembles PATH dirs from project entries then global entries,
 // each contributing its Bins joined onto its install dir, deduplicated
 // preserving first occurrence — so a project entry always shadows a
-// same-named global one. Entries not marked onPath (keg-only link deps)
-// contribute nothing.
+// same-named global one. Entries not marked onPath (link-only deps, whose
+// libraries load but whose binaries never join PATH) contribute nothing.
 func buildPath(projectEntries, globalEntries []resolvedEntry) []string {
 	seen := map[string]bool{}
 	var out []string
