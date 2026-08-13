@@ -167,6 +167,24 @@ func assertNoStrayStaging(t *testing.T, installDir string) {
 	}
 }
 
+func TestInstallRecordsLibsInMeta(t *testing.T) {
+	h := testHome(t)
+	pkg := fixturePkg(t)
+	pkg.Libs = []string{"lib"}
+
+	if err := install.Install(context.Background(), h, pkg, "v1.0.0", "official", fixtureArtifact(t, t.TempDir())); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	meta, err := install.ReadMeta(h, pkg.Name, "v1.0.0")
+	if err != nil {
+		t.Fatalf("ReadMeta: %v", err)
+	}
+	if len(meta.Libs) != 1 || meta.Libs[0] != "lib" {
+		t.Fatalf("meta.Libs = %v, want [lib]", meta.Libs)
+	}
+}
+
 func TestIsInstalledFalseWhenAbsent(t *testing.T) {
 	h := testHome(t)
 	if install.IsInstalled(h, "tool", "v1.0.0") {

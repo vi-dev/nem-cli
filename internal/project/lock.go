@@ -20,6 +20,9 @@ type LockEntry struct {
 	Direct    bool     `toml:"direct"`
 	Platforms []string `toml:"platforms"`
 	Digest    string   `toml:"digest,omitempty"`
+
+	OnPath       bool `toml:"on_path"`
+	OnLoaderPath bool `toml:"on_loader_path,omitempty"`
 }
 
 type Lockfile struct {
@@ -48,8 +51,13 @@ func LoadLock(path string) (*Lockfile, error) {
 	if err := d.Decode(&raw); err != nil {
 		return nil, wrapTOMLError(path, err)
 	}
-	if raw.Version != 1 {
+	if raw.Version != 1 && raw.Version != 2 {
 		return nil, fmt.Errorf("parse %s: unsupported lock version %d", path, raw.Version)
+	}
+	if raw.Version == 1 {
+		for i := range raw.Packages {
+			raw.Packages[i].OnPath = true
+		}
 	}
 	lf.Packages = raw.Packages
 	return lf, nil
@@ -59,7 +67,7 @@ func LoadLock(path string) (*Lockfile, error) {
 func WriteLock(lf *Lockfile) error {
 	pkgs := append([]LockEntry(nil), lf.Packages...)
 	sort.Slice(pkgs, func(i, j int) bool { return pkgs[i].Name < pkgs[j].Name })
-	body, err := toml.Marshal(rawLock{Version: 1, Packages: pkgs})
+	body, err := toml.Marshal(rawLock{Version: 2, Packages: pkgs})
 	if err != nil {
 		return fmt.Errorf("render %s: %w", lf.Path, err)
 	}

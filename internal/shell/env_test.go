@@ -418,6 +418,64 @@ func sourceInBash(t *testing.T, bashPath string, env map[string]string, script s
 	return result
 }
 
+func TestEnvScriptLoaderPathPrependsWithSaveRestore(t *testing.T) {
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH", LoaderPath: []string{"/n/openssl/lib"}}
+	out, err := EnvScript(Bash, res, mapGetenv(map[string]string{}))
+	if err != nil {
+		t.Fatalf("EnvScript: %v", err)
+	}
+	if !strings.Contains(out, "export NEM_SAVED__DYLD_LIBRARY_PATH_SET='0'\n") {
+		t.Errorf("missing unset-marker save for the loader var, got:\n%s", out)
+	}
+	if !strings.Contains(out, "export DYLD_LIBRARY_PATH='/n/openssl/lib'\n") {
+		t.Errorf("previously-unset loader var must be set to just the nem dirs, got:\n%s", out)
+	}
+}
+
+func TestEnvScriptLoaderPathAppendsSavedOriginalWhenSet(t *testing.T) {
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH", LoaderPath: []string{"/n/openssl/lib"}}
+	getenv := mapGetenv(map[string]string{"DYLD_LIBRARY_PATH": "/sys/lib"})
+	out, err := EnvScript(Bash, res, getenv)
+	if err != nil {
+		t.Fatalf("EnvScript: %v", err)
+	}
+	if !strings.Contains(out, "export NEM_SAVED__DYLD_LIBRARY_PATH='/sys/lib'\n") {
+		t.Errorf("missing saved original, got:\n%s", out)
+	}
+	if !strings.Contains(out, "export DYLD_LIBRARY_PATH='/n/openssl/lib':'/sys/lib'\n") {
+		t.Errorf("must prepend nem dirs ahead of the saved original, got:\n%s", out)
+	}
+}
+
+func TestEnvScriptLoaderPathLeavingRestores(t *testing.T) {
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH"} // no LoaderPath now
+	getenv := mapGetenv(map[string]string{
+		"NEM_SAVED__DYLD_LIBRARY_PATH":     "/sys/lib",
+		"NEM_SAVED__DYLD_LIBRARY_PATH_SET": "1",
+	})
+	out, err := EnvScript(Bash, res, getenv)
+	if err != nil {
+		t.Fatalf("EnvScript: %v", err)
+	}
+	if !strings.Contains(out, "export DYLD_LIBRARY_PATH='/sys/lib'\n") {
+		t.Errorf("leaving must restore the saved loader var, got:\n%s", out)
+	}
+	if !strings.Contains(out, "unset NEM_SAVED__DYLD_LIBRARY_PATH NEM_SAVED__DYLD_LIBRARY_PATH_SET\n") {
+		t.Errorf("leaving must clear the loader var bookkeeping, got:\n%s", out)
+	}
+}
+
+func TestEnvScriptLoaderPathUntouchedWhenNeverManaged(t *testing.T) {
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH"} // no path, never managed
+	out, err := EnvScript(Bash, res, mapGetenv(map[string]string{}))
+	if err != nil {
+		t.Fatalf("EnvScript: %v", err)
+	}
+	if strings.Contains(out, "DYLD_LIBRARY_PATH") {
+		t.Errorf("a library-free shell must never mention the loader var, got:\n%s", out)
+	}
+}
+
 func TestEnvScriptBashAndZshBodiesAreIdentical(t *testing.T) {
 	res := envx.Result{
 		Vars: []envx.Var{{Name: "FOO", Value: "bar"}},

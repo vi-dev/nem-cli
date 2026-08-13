@@ -75,6 +75,7 @@ func EnvScript(d Dialect, res envx.Result, getenv func(string) (string, bool)) (
 	}
 
 	writePath(&b, res.Path)
+	writeLoaderPath(&b, res.LoaderVar, res.LoaderPath, getenv)
 
 	fmt.Fprintf(&b, "export %s=%s\n", managedKeysVar, quote(strings.Join(newKeyList, " ")))
 
@@ -144,6 +145,50 @@ func writePath(b *strings.Builder, paths []string) {
 		quoted[i] = quote(p)
 	}
 	fmt.Fprintf(b, "export PATH=%s:\"${NEM_ORIGINAL_PATH:-$PATH}\"\n", strings.Join(quoted, ":"))
+}
+
+// writeLoaderPath applies the nem-computed loader search var with the same
+// save/restore contract as regular managed vars, but prepends nem's dirs
+// ahead of the recorded pre-nem original. It emits nothing when the var is
+// neither requested now (empty dirs) nor already managed, so a shell that
+// never uses a library package leaves the loader var untouched. When dirs is
+// empty but the var was managed, it restores the pre-nem value (unsetting it
+// when there was none). name is trusted here — envx sets it to a fixed
+// platform var (DYLD_LIBRARY_PATH / LD_LIBRARY_PATH).
+func writeLoaderPath(b *strings.Builder, name string, dirs []string, getenv func(string) (string, bool)) {
+	if name == "" {
+		return
+	}
+	setVal, managed := getenv("NEM_SAVED__" + name + "_SET")
+
+	if len(dirs) == 0 {
+		if managed {
+			writeRestore(b, name, getenv)
+		}
+		return
+	}
+
+	origValue := ""
+	origWasSet := false
+	if managed {
+		if setVal == "1" {
+			origWasSet = true
+			origValue, _ = getenv("NEM_SAVED__" + name)
+		}
+	} else {
+		origValue, origWasSet = getenv(name)
+		writeSave(b, name, getenv)
+	}
+
+	quoted := make([]string, len(dirs))
+	for i, d := range dirs {
+		quoted[i] = quote(d)
+	}
+	value := strings.Join(quoted, ":")
+	if origWasSet {
+		value += ":" + quote(origValue)
+	}
+	fmt.Fprintf(b, "export %s=%s\n", name, value)
 }
 
 // quote renders s as a single-quoted POSIX shell word. An embedded

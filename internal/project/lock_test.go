@@ -22,7 +22,7 @@ func TestLockRoundTrip(t *testing.T) {
 
 	data, _ := os.ReadFile(path)
 	text := string(data)
-	if !strings.Contains(text, "machine-written") || !strings.Contains(text, "version = 1") {
+	if !strings.Contains(text, "machine-written") || !strings.Contains(text, "version = 2") {
 		t.Fatalf("header missing:\n%s", text)
 	}
 	if strings.Index(text, `name = "go"`) > strings.Index(text, `name = "helm"`) {
@@ -51,6 +51,40 @@ func TestLoadLockRejectsUnknownVersion(t *testing.T) {
 	os.WriteFile(path, []byte("version = 9\n"), 0o644)
 	if _, err := LoadLock(path); err == nil {
 		t.Fatal("want error for unknown lock version")
+	}
+}
+
+func TestLoadLockV1SynthesizesOnPath(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nem.lock")
+	os.WriteFile(path, []byte("version = 1\n\n[[package]]\nname = \"go\"\nversion = \"v1.26.5\"\ncatalog = \"c\"\ndirect = true\nplatforms = [\"linux/amd64\"]\n"), 0o644)
+	lf, err := LoadLock(path)
+	if err != nil {
+		t.Fatalf("LoadLock: %v", err)
+	}
+	if !lf.Packages[0].OnPath {
+		t.Fatalf("v1 lock entries must synthesize on_path=true, got %+v", lf.Packages[0])
+	}
+}
+
+func TestLockV2RoundTripPreservesRoles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nem.lock")
+	lf := &Lockfile{Path: path, Packages: []LockEntry{
+		{Name: "openssl", Version: "v3.4.0", Catalog: "c", Platforms: []string{"linux/amd64"}, OnPath: false, OnLoaderPath: true},
+	}}
+	if err := WriteLock(lf); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "version = 2") {
+		t.Fatalf("v2 lock must declare version = 2:\n%s", data)
+	}
+	loaded, err := LoadLock(path)
+	if err != nil {
+		t.Fatalf("LoadLock: %v", err)
+	}
+	e := loaded.Packages[0]
+	if e.OnPath || !e.OnLoaderPath {
+		t.Fatalf("roles not round-tripped: %+v", e)
 	}
 }
 

@@ -19,6 +19,7 @@ type rawPackage struct {
 	Artifact         rawArtifact                  `yaml:"artifact"`
 	Install          []map[string]yaml.RawMessage `yaml:"install"`
 	Bins             []string                     `yaml:"bins"`
+	Libs             []string                     `yaml:"libs"`
 	Env              []rawEnv                     `yaml:"env"`
 	Build            *rawBuild                    `yaml:"build"`
 	Versions         []yaml.RawMessage            `yaml:"versions"`
@@ -28,6 +29,8 @@ type rawDep struct {
 	Name      string   `yaml:"name"`
 	Version   string   `yaml:"version"`
 	Platforms []string `yaml:"platforms"`
+	Kind      string   `yaml:"kind"`
+	Compat    string   `yaml:"compat"`
 }
 
 type rawDiscovery struct {
@@ -78,6 +81,7 @@ func Parse(data []byte) (*Package, error) {
 	if len(p.Bins) == 0 {
 		p.Bins = []string{"bin"}
 	}
+	p.Libs = raw.Libs
 	var err error
 	if p.Platforms, err = parsePlatforms(raw.Platforms); err != nil {
 		return nil, err
@@ -170,7 +174,22 @@ func shapeDep(d rawDep) (Dep, error) {
 	if err != nil {
 		return Dep{}, err
 	}
-	return Dep{Name: d.Name, Version: d.Version, Platforms: plats}, nil
+	kind, err := parseDepKind(d.Kind)
+	if err != nil {
+		return Dep{}, err
+	}
+	return Dep{Name: d.Name, Version: d.Version, Platforms: plats, Kind: kind, Compat: d.Compat}, nil
+}
+
+func parseDepKind(s string) (DepKind, error) {
+	switch s {
+	case "", "run":
+		return DepKindRun, nil
+	case "link":
+		return DepKindLink, nil
+	default:
+		return "", fmt.Errorf("invalid dep kind %q (want run or link)", s)
+	}
 }
 
 func shapeAction(m map[string]yaml.RawMessage) (Action, error) {

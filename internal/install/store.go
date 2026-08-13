@@ -24,6 +24,7 @@ type Meta struct {
 	Version     string           `yaml:"version"`
 	Catalog     string           `yaml:"catalog"`
 	Bins        []string         `yaml:"bins"`
+	Libs        []string         `yaml:"libs,omitempty"`
 	Env         []spec.EnvExport `yaml:"env,omitempty"`
 	InstalledAt time.Time        `yaml:"installed_at"`
 }
@@ -101,6 +102,7 @@ func writeMeta(staging string, pkg *spec.Package, version, catalog string) error
 		Version:     version,
 		Catalog:     catalog,
 		Bins:        pkg.Bins,
+		Libs:        pkg.Libs,
 		Env:         pkg.Env,
 		InstalledAt: time.Now().UTC(),
 	}

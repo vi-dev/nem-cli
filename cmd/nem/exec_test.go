@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/vi-dev/nem-cli/internal/envx"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
@@ -169,7 +170,7 @@ func installFakeTool(t *testing.T, h home.Home, marker string) project.LockEntry
 		t.Fatalf("install fake tool: %v", err)
 	}
 	return project.LockEntry{
-		Name: "mytool", Version: "v1.0.0", Catalog: "test", Direct: true,
+		Name: "mytool", Version: "v1.0.0", Catalog: "test", Direct: true, OnPath: true,
 		Platforms: []string{spec.Current().String()},
 	}
 }
@@ -331,4 +332,40 @@ func TestExitCodeForSignalKill(t *testing.T) {
 	if got := exitCodeFor(err); got != want {
 		t.Fatalf("exitCodeFor = %d, want %d", got, want)
 	}
+}
+
+func TestBuildChildEnvPrependsLoaderVar(t *testing.T) {
+	base := []string{"PATH=/usr/bin", "DYLD_LIBRARY_PATH=/sys/lib"}
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH", LoaderPath: []string{"/n/openssl/lib"}}
+
+	env := buildChildEnv(base, res, "/nem/bin:/usr/bin")
+
+	count := 0
+	got := ""
+	for _, kv := range env {
+		if name, value, ok := strings.Cut(kv, "="); ok && name == "DYLD_LIBRARY_PATH" {
+			count++
+			got = value
+		}
+	}
+	if count != 1 {
+		t.Fatalf("DYLD_LIBRARY_PATH must appear exactly once (replace, not duplicate), got %d entries: %v", count, env)
+	}
+	if got != "/n/openssl/lib:/sys/lib" {
+		t.Fatalf("DYLD_LIBRARY_PATH = %q, want /n/openssl/lib:/sys/lib", got)
+	}
+}
+
+func TestBuildChildEnvLeavesLoaderVarWhenNoLibraries(t *testing.T) {
+	base := []string{"PATH=/usr/bin", "DYLD_LIBRARY_PATH=/sys/lib"}
+	res := envx.Result{LoaderVar: "DYLD_LIBRARY_PATH"} // no LoaderPath
+
+	env := buildChildEnv(base, res, "/nem/bin:/usr/bin")
+
+	for _, kv := range env {
+		if kv == "DYLD_LIBRARY_PATH=/sys/lib" {
+			return
+		}
+	}
+	t.Fatalf("inherited DYLD_LIBRARY_PATH must be left untouched, got %v", env)
 }

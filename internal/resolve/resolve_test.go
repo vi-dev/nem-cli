@@ -406,6 +406,160 @@ versions:
 	}
 }
 
+func TestResolveRolesRunVsLink(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: gpgme
+deps:
+  - name: gpg
+  - name: openssl
+    kind: link
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: gpg
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.4.0]
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "gpgme"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	gpgme := entry(t, res, "gpgme")
+	gpg := entry(t, res, "gpg")
+	openssl := entry(t, res, "openssl")
+	if !gpgme.OnPath {
+		t.Fatalf("gpgme (direct) should be on_path: %+v", gpgme)
+	}
+	if !gpg.OnPath || gpg.OnLoaderPath {
+		t.Fatalf("gpg (run dep) should be on_path only: %+v", gpg)
+	}
+	if openssl.OnPath || !openssl.OnLoaderPath {
+		t.Fatalf("openssl (link dep with libs) should be on_loader_path only, never on_path: %+v", openssl)
+	}
+}
+
+func TestResolveLinkDepFloatsWithinCompat(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: app
+deps:
+  - name: openssl
+    kind: link
+    compat: "3"
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions:
+  - v4.0.0
+  - v3.5.1
+  - v3.4.0
+  - v1.1.1
+`)
+	res, err := resolve.Resolve(context.Background(), []resolve.Tool{{Key: project.ToolKey{Name: "app"}}}, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if v := entry(t, res, "openssl").Version; v != "v3.5.1" {
+		t.Fatalf("openssl floated to %s, want highest 3.x (v3.5.1)", v)
+	}
+}
+
+func TestResolveIncompatibleCompatConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: p1
+deps: [{name: openssl, kind: link, compat: "1"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p2
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.5.1, v1.1.1]
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "p1"}}, {Key: project.ToolKey{Name: "p2"}}}
+	_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	var sce *resolve.SonameConflictError
+	if !errors.As(err, &sce) {
+		t.Fatalf("want SonameConflictError, got %v", err)
+	}
+	if sce.Name != "openssl" {
+		t.Fatalf("conflict should name openssl: %+v", sce)
+	}
+}
+
+func TestResolveCompatTighterAndWiderReconcile(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: p1
+deps: [{name: openssl, kind: link, compat: "3.4"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p2
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.5.1, v3.4.9, v3.4.2, v1.1.1]
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "p1"}}, {Key: project.ToolKey{Name: "p2"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("compatible ranges must reconcile, got error: %v", err)
+	}
+	if v := entry(t, res, "openssl").Version; v != "v3.4.9" {
+		t.Fatalf("openssl = %s, want highest satisfying both 3 and 3.4 (v3.4.9)", v)
+	}
+}
+
 func TestResolveCycleTerminates(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `

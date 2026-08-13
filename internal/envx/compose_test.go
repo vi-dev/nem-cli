@@ -51,10 +51,10 @@ func TestComposePrecedencePackageExportOverriddenByEnvLayers(t *testing.T) {
 	}}
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "pkgg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "pkgg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	projectLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "pkgp", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "pkgp", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
@@ -94,9 +94,9 @@ func TestComposePathOrderDirectThenIndirectAlphabetical(t *testing.T) {
 	h := testHome()
 
 	projectLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "zebra", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
-		{Name: "apple", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
-		{Name: "mango", Version: "1.0.0", Direct: false, Platforms: []string{currentPlatform()}},
+		{Name: "zebra", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+		{Name: "apple", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+		{Name: "mango", Version: "1.0.0", Direct: false, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	globalLock := &project.Lockfile{}
 
@@ -133,11 +133,11 @@ func TestComposePathProjectBeforeGlobalWithDedup(t *testing.T) {
 	// "shared" appears identically (same name+version) in both locks: the
 	// install dir is the same, so it must dedup to a single PATH entry.
 	projectLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "shared", Version: "2.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "shared", Version: "2.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "shared", Version: "2.0.0", Direct: true, Platforms: []string{currentPlatform()}},
-		{Name: "curl", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "shared", Version: "2.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+		{Name: "curl", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
@@ -198,7 +198,7 @@ func TestComposeSelfReferentialEnvUsesSavedOriginalNotComposedValue(t *testing.T
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "1.0.0"): {Env: []spec.EnvExport{
@@ -252,7 +252,7 @@ func TestComposePackageExportTemplateExpansion(t *testing.T) {
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "9.9.9", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "9.9.9", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "9.9.9"): {Env: []spec.EnvExport{
@@ -281,7 +281,7 @@ func TestComposePackageExportBrokenTemplateWarning(t *testing.T) {
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "1.0.0"): {Env: []spec.EnvExport{
@@ -306,7 +306,7 @@ func TestComposePackageExportReservedNameSkippedBeforeTemplateRender(t *testing.
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "1.0.0"): {Env: []spec.EnvExport{
@@ -329,7 +329,7 @@ func TestComposeManagedKeysIncludePackageExportsForSavedOriginal(t *testing.T) {
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "1.0.0"): {Env: []spec.EnvExport{
@@ -366,7 +366,7 @@ func TestComposePackageExportPlatformConstraintExcludesOtherPlatforms(t *testing
 	h := testHome()
 
 	globalLock := &project.Lockfile{Packages: []project.LockEntry{
-		{Name: "toolg", Version: "1.0.0", Direct: true, Platforms: []string{currentPlatform()}},
+		{Name: "toolg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
 	}}
 	metaLookup := mapMetaLookup(map[string]*install.Meta{
 		metaKey("toolg", "1.0.0"): {Env: []spec.EnvExport{
@@ -414,6 +414,46 @@ func TestComposeSkipsLockEntriesNotOnCurrentPlatform(t *testing.T) {
 	}
 	if len(result.Warnings) != 0 {
 		t.Fatalf("Warnings = %v, want empty (platform-excluded entries are not an error)", result.Warnings)
+	}
+}
+
+func TestComposeKegOnlyLinkDepLibsNotOnPath(t *testing.T) {
+	h := testHome()
+	projectLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "app", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+		{Name: "openssl", Version: "3.4.0", OnLoaderPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	metaLookup := mapMetaLookup(map[string]*install.Meta{
+		metaKey("app", "1.0.0"):     {Bins: []string{"bin"}},
+		metaKey("openssl", "3.4.0"): {Bins: []string{"bin"}, Libs: []string{"lib"}},
+	})
+
+	result := Compose(&project.Manifest{}, &project.Manifest{}, projectLock, &project.Lockfile{}, h, metaLookup, mapGetenv(nil))
+
+	appBin, _ := h.PackageDir("app", "1.0.0")
+	opensslBin, _ := h.PackageDir("openssl", "3.4.0")
+	if len(result.Path) != 1 || result.Path[0] != filepath.Join(appBin, "bin") {
+		t.Fatalf("Path = %v, want only app/bin (openssl bins must be keg-only)", result.Path)
+	}
+	if len(result.LoaderPath) != 1 || result.LoaderPath[0] != filepath.Join(opensslBin, "lib") {
+		t.Fatalf("LoaderPath = %v, want [openssl/lib]", result.LoaderPath)
+	}
+}
+
+func TestComposeNoLibrariesLeavesLoaderPathEmpty(t *testing.T) {
+	h := testHome()
+	projectLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "app", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	metaLookup := mapMetaLookup(map[string]*install.Meta{
+		metaKey("app", "1.0.0"): {Bins: []string{"bin"}},
+	})
+	result := Compose(&project.Manifest{}, &project.Manifest{}, projectLock, &project.Lockfile{}, h, metaLookup, mapGetenv(nil))
+	if len(result.LoaderPath) != 0 {
+		t.Fatalf("LoaderPath = %v, want empty for a library-free closure", result.LoaderPath)
+	}
+	if result.LoaderVar == "" {
+		t.Fatalf("LoaderVar should still name the platform var so leaving a project can restore it")
 	}
 }
 

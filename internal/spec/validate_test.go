@@ -101,3 +101,42 @@ func TestValidateSha256CoversDeclaredSubset(t *testing.T) {
 		t.Fatalf("subset-complete sha256 rejected: %v", err)
 	}
 }
+
+func TestValidateCompatRequiresLinkKind(t *testing.T) {
+	pkg, err := Parse([]byte(`
+schema: 2
+name: a
+deps:
+  - name: b
+    compat: "3"
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := pkg.Validate(); err == nil || !strings.Contains(err.Error(), "compat requires kind: link") {
+		t.Fatalf("want compat-requires-link error, got %v", err)
+	}
+}
+
+func TestValidateCompatFormat(t *testing.T) {
+	pkg, err := Parse([]byte(`
+schema: 2
+name: a
+deps:
+  - name: b
+    kind: link
+    compat: "3.x"
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := pkg.Validate(); err == nil || !strings.Contains(err.Error(), "invalid compat") {
+		t.Fatalf("want invalid-compat error, got %v", err)
+	}
+}

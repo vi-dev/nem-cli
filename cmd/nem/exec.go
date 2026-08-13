@@ -75,7 +75,7 @@ func composedPath() (envx.Result, string, error) {
 		console.Warn("%s", w)
 	}
 
-	pathValue := prependPath(result.Path, currentPathValue(os.Environ()))
+	pathValue := prependPath(result.Path, envValue(os.Environ(), "PATH"))
 	return result, pathValue, nil
 }
 
@@ -110,30 +110,25 @@ func runExec(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// currentPathValue returns the PATH entry's value out of an os.Environ-style
-// slice, or "" when unset.
-func currentPathValue(env []string) string {
-	for _, kv := range env {
-		if name, value, ok := strings.Cut(kv, "="); ok && name == "PATH" {
-			return value
-		}
-	}
-	return ""
-}
-
 // buildChildEnv overlays res's composed vars onto base — the invoking
 // process's own environment, as "name=value" pairs — replacing any existing
-// entry for an overlaid name, and sets PATH to pathValue. It builds a fresh
-// env slice for the child rather than mutating the invoking process's
-// environment: exec runs a single child, not an interactive shell, so there
-// is nothing to save or restore afterward.
+// entry for an overlaid name, sets PATH to pathValue, and (when res.LoaderPath
+// is non-empty) prepends it onto base's existing res.LoaderVar entry. It
+// builds a fresh env slice for the child rather than mutating the invoking
+// process's environment: exec runs a single child, not an interactive shell,
+// so there is nothing to save or restore afterward.
 func buildChildEnv(base []string, res envx.Result, pathValue string) []string {
 	overlay := make(map[string]string, len(res.Vars))
 	for _, v := range res.Vars {
 		overlay[v.Name] = v.Value
 	}
 
-	env := make([]string, 0, len(base)+len(res.Vars)+1)
+	loaderValue := ""
+	if res.LoaderVar != "" && len(res.LoaderPath) > 0 {
+		loaderValue = prependPath(res.LoaderPath, envValue(base, res.LoaderVar))
+	}
+
+	env := make([]string, 0, len(base)+len(res.Vars)+2)
 	applied := make(map[string]bool, len(overlay))
 	for _, kv := range base {
 		name, _, ok := strings.Cut(kv, "=")
@@ -142,6 +137,9 @@ func buildChildEnv(base []string, res envx.Result, pathValue string) []string {
 			continue
 		}
 		if name == "PATH" {
+			continue
+		}
+		if loaderValue != "" && name == res.LoaderVar {
 			continue
 		}
 		if nv, ok := overlay[name]; ok {
@@ -159,7 +157,20 @@ func buildChildEnv(base []string, res envx.Result, pathValue string) []string {
 	}
 
 	env = append(env, "PATH="+pathValue)
+	if loaderValue != "" {
+		env = append(env, res.LoaderVar+"="+loaderValue)
+	}
 	return env
+}
+
+// envValue returns key's value from an os.Environ-style slice, or "".
+func envValue(env []string, key string) string {
+	for _, kv := range env {
+		if name, value, ok := strings.Cut(kv, "="); ok && name == key {
+			return value
+		}
+	}
+	return ""
 }
 
 // prependPath renders dirs prepended onto existing, joined with the

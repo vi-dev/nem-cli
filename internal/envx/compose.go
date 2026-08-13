@@ -18,9 +18,11 @@ type Var struct{ Name, Value string }
 
 // Result is the outcome of composing a directory's environment.
 type Result struct {
-	Vars     []Var    // final vars, one per name, sorted by name
-	Path     []string // absolute bin dirs to prepend, ordered, deduped
-	Warnings []string // reserved names skipped, broken templates, etc.
+	Vars       []Var    // final vars, one per name, sorted by name
+	Path       []string // absolute bin dirs to prepend, ordered, deduped
+	LoaderVar  string   // platform loader var name (DYLD_/LD_LIBRARY_PATH)
+	LoaderPath []string // absolute lib dirs to prepend, ordered, deduped
+	Warnings   []string // reserved names skipped, broken templates, etc.
 }
 
 // Compose builds the environment for a directory from project+global
@@ -41,6 +43,7 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 	warnings = append(warnings, w...)
 
 	path := buildPath(resolvedProject, resolvedGlobal)
+	loaderPath := buildLoaderPath(resolvedProject, resolvedGlobal)
 
 	vars := map[string]string{}
 	applyPackageExports(resolvedGlobal, vars, &warnings)
@@ -56,7 +59,7 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 	}
 	sort.Strings(names)
 
-	result := Result{Path: path, Warnings: warnings}
+	result := Result{Path: path, LoaderVar: loaderPathVar(), LoaderPath: loaderPath, Warnings: warnings}
 	for _, name := range names {
 		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name]})
 	}
@@ -70,6 +73,8 @@ type resolvedEntry struct {
 	name, version string
 	installDir    string
 	meta          *install.Meta
+	onPath        bool
+	onLoaderPath  bool
 }
 
 // orderedLockEntries returns lock's entries valid on the current platform:
@@ -118,7 +123,10 @@ func resolveEntries(entries []project.LockEntry, metaLookup func(name, version s
 			warnings = append(warnings, fmt.Sprintf("install dir for %s@%s: %v", e.Name, e.Version, err))
 			continue
 		}
-		out = append(out, resolvedEntry{name: e.Name, version: e.Version, installDir: installDir, meta: meta})
+		out = append(out, resolvedEntry{
+			name: e.Name, version: e.Version, installDir: installDir, meta: meta,
+			onPath: e.OnPath, onLoaderPath: e.OnLoaderPath,
+		})
 	}
 	return out, warnings
 }
@@ -126,12 +134,16 @@ func resolveEntries(entries []project.LockEntry, metaLookup func(name, version s
 // buildPath assembles PATH dirs from project entries then global entries,
 // each contributing its Bins joined onto its install dir, deduplicated
 // preserving first occurrence — so a project entry always shadows a
-// same-named global one.
+// same-named global one. Entries not marked onPath (keg-only link deps)
+// contribute nothing.
 func buildPath(projectEntries, globalEntries []resolvedEntry) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, entries := range [][]resolvedEntry{projectEntries, globalEntries} {
 		for _, r := range entries {
+			if !r.onPath {
+				continue
+			}
 			for _, bin := range r.meta.Bins {
 				dir := filepath.Join(r.installDir, bin)
 				if seen[dir] {
@@ -143,6 +155,39 @@ func buildPath(projectEntries, globalEntries []resolvedEntry) []string {
 		}
 	}
 	return out
+}
+
+// buildLoaderPath assembles loader-search dirs from on-loader-path entries,
+// each contributing its Libs joined onto its install dir, project before
+// global, deduplicated preserving first occurrence.
+func buildLoaderPath(projectEntries, globalEntries []resolvedEntry) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, entries := range [][]resolvedEntry{projectEntries, globalEntries} {
+		for _, r := range entries {
+			if !r.onLoaderPath {
+				continue
+			}
+			for _, lib := range r.meta.Libs {
+				dir := filepath.Join(r.installDir, lib)
+				if seen[dir] {
+					continue
+				}
+				seen[dir] = true
+				out = append(out, dir)
+			}
+		}
+	}
+	return out
+}
+
+// loaderPathVar is the platform's dynamic-linker search variable: nem sets
+// this one directly from buildLoaderPath, never via a package export.
+func loaderPathVar() string {
+	if spec.Current().OS == "darwin" {
+		return "DYLD_LIBRARY_PATH"
+	}
+	return "LD_LIBRARY_PATH"
 }
 
 // applyPackageExports renders each entry's raw env templates against its

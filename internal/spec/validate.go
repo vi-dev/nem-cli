@@ -9,6 +9,9 @@ import (
 // EnvNameRE validates environment variable names.
 var EnvNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// CompatRE validates a dep's soname-compat range: a dotted numeric prefix.
+var CompatRE = regexp.MustCompile(`^\d+(\.\d+)*$`)
+
 // SupportedBy expands the package's platform constraint to full os/arch
 // pairs: the declared subset, or all four when unconstrained.
 func (p *Package) SupportedBy() []Platform {
@@ -115,6 +118,12 @@ func (p *Package) Validate() error {
 	for _, d := range p.Deps {
 		if !NameRE.MatchString(d.Name) {
 			return fmt.Errorf("dep %q: invalid name", d.Name)
+		}
+		if d.Compat != "" && d.Kind != DepKindLink {
+			return fmt.Errorf("dep %q: compat requires kind: link", d.Name)
+		}
+		if d.Compat != "" && !CompatRE.MatchString(d.Compat) {
+			return fmt.Errorf("dep %q: invalid compat %q", d.Name, d.Compat)
 		}
 	}
 	return nil

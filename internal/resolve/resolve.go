@@ -37,15 +37,101 @@ func (e *UnsupportedPlatformError) Error() string {
 	return fmt.Sprintf("package %s@%s supports none of nem's platforms", e.Name, e.Version)
 }
 
+// SonameConflictError reports two incompatible compat ranges required for
+// one package in a single resolution.
+type SonameConflictError struct{ Name, A, B string }
+
+func (e *SonameConflictError) Error() string {
+	return fmt.Sprintf("package %s: incompatible dependency ranges %q and %q", e.Name, e.A, e.B)
+}
+
+// compatComponents splits a version or compat string into dotted components,
+// dropping an optional leading "v".
+func compatComponents(s string) []string {
+	return strings.Split(strings.TrimPrefix(s, "v"), ".")
+}
+
+// matchesCompat reports whether version has compat's components as a prefix.
+func matchesCompat(version, compat string) bool {
+	vs, cs := compatComponents(version), compatComponents(compat)
+	if len(cs) > len(vs) {
+		return false
+	}
+	for i := range cs {
+		if vs[i] != cs[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// selectCompat returns the highest version matching compat, or "" if none.
+func selectCompat(versions []spec.VersionEntry, compat string) string {
+	best := ""
+	for _, v := range versions {
+		if !matchesCompat(v.Version, compat) {
+			continue
+		}
+		if best == "" || higher(v.Version, best) {
+			best = v.Version
+		}
+	}
+	return best
+}
+
+// mergeCompat combines two compat ranges: "" is identity; otherwise the
+// tighter (longer) wins when one is a prefix of the other, and incompatible
+// ranges report ok=false.
+func mergeCompat(a, b string) (string, bool) {
+	switch {
+	case a == "":
+		return b, true
+	case b == "":
+		return a, true
+	}
+	as, bs := compatComponents(a), compatComponents(b)
+	n := len(as)
+	if len(bs) < n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		if as[i] != bs[i] {
+			return "", false
+		}
+	}
+	if len(as) >= len(bs) {
+		return a, true
+	}
+	return b, true
+}
+
 // acc is one package's reconciled state across the whole resolution: the
 // currently-winning version and its source, plus the union of platforms
 // that need it.
 type acc struct {
-	version   string
-	catalog   string
-	digest    string
-	pkg       *spec.Package
-	platforms map[spec.Platform]bool
+	version      string
+	compat       string
+	catalog      string
+	digest       string
+	pkg          *spec.Package
+	platforms    map[spec.Platform]bool
+	onPath       bool
+	onLoaderPath bool
+}
+
+// contribution is how a single reach of a package feeds env composition:
+// whether its bins go on PATH and whether its libs go on the loader path.
+type contribution struct{ onPath, onLoaderPath bool }
+
+func directContribution(pkg *spec.Package) contribution {
+	return contribution{onPath: true, onLoaderPath: len(pkg.Libs) > 0}
+}
+
+func edgeContribution(kind spec.DepKind, pkg *spec.Package) contribution {
+	if kind == spec.DepKindLink {
+		return contribution{onPath: false, onLoaderPath: len(pkg.Libs) > 0}
+	}
+	return contribution{onPath: true, onLoaderPath: false}
 }
 
 // root is a direct tool's resolved starting point for the per-platform DFS.
@@ -83,7 +169,7 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 			if !supports(r.pkg, platform) {
 				continue
 			}
-			if err := walk(ctx, sources, r.name, r.version, r.catalog, r.digest, r.pkg, platform, visited, accs); err != nil {
+			if err := walk(ctx, sources, r.name, r.version, r.catalog, r.digest, r.pkg, directContribution(r.pkg), platform, visited, accs); err != nil {
 				return nil, err
 			}
 		}
@@ -99,12 +185,14 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 			}
 		}
 		entries = append(entries, project.LockEntry{
-			Name:      name,
-			Version:   a.version,
-			Catalog:   a.catalog,
-			Direct:    directNames[name],
-			Platforms: platforms,
-			Digest:    a.digest,
+			Name:         name,
+			Version:      a.version,
+			Catalog:      a.catalog,
+			Direct:       directNames[name],
+			Platforms:    platforms,
+			Digest:       a.digest,
+			OnPath:       a.onPath,
+			OnLoaderPath: a.onLoaderPath,
 		})
 		pkgs[name] = a.pkg
 	}
@@ -118,13 +206,19 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 // only descends into its deps the first time it's reached on this
 // platform — that first-wins guard is what stops a dependency cycle from
 // recursing forever.
-func walk(ctx context.Context, sources []catalog.Named, name, version, catName, digest string, pkg *spec.Package, platform spec.Platform, visited map[string]bool, accs map[string]*acc) error {
-	reconcile(accs, name, version, catName, digest, pkg, platform)
+func walk(ctx context.Context, sources []catalog.Named, name, version, catName, digest string, pkg *spec.Package, contrib contribution, platform spec.Platform, visited map[string]bool, accs map[string]*acc) error {
+	if err := reconcile(accs, name, version, "", catName, digest, pkg, contrib, platform); err != nil {
+		return err
+	}
 	if visited[name] {
 		return nil
 	}
 	visited[name] = true
+	return walkDeps(ctx, sources, pkg, platform, visited, accs)
+}
 
+// walkDeps reconciles and (first-wins) recurses into pkg's deps for platform.
+func walkDeps(ctx context.Context, sources []catalog.Named, pkg *spec.Package, platform spec.Platform, visited map[string]bool, accs map[string]*acc) error {
 	for _, dep := range pkg.Deps {
 		if !depIncludes(dep, platform) {
 			continue
@@ -136,15 +230,34 @@ func walk(ctx context.Context, sources []catalog.Named, name, version, catName, 
 		if !supports(depPkg, platform) {
 			continue
 		}
-		depVersion, err := resolveVersion(depPkg, dep.Name, dep.Version, depCat)
+		depVersion, err := resolveDepVersion(depPkg, dep, depCat)
 		if err != nil {
 			return err
 		}
-		if err := walk(ctx, sources, dep.Name, depVersion, depCat, depDig, depPkg, platform, visited, accs); err != nil {
+		if err := reconcile(accs, dep.Name, depVersion, dep.Compat, depCat, depDig, depPkg, edgeContribution(dep.Kind, depPkg), platform); err != nil {
+			return err
+		}
+		if visited[dep.Name] {
+			continue
+		}
+		visited[dep.Name] = true
+		if err := walkDeps(ctx, sources, depPkg, platform, visited, accs); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// resolveDepVersion picks a dep's version: the highest match within a link
+// dep's compat range, else exact-or-latest.
+func resolveDepVersion(pkg *spec.Package, dep spec.Dep, catName string) (string, error) {
+	if dep.Kind == spec.DepKindLink && dep.Compat != "" {
+		if v := selectCompat(pkg.Versions, dep.Compat); v != "" {
+			return v, nil
+		}
+		return "", &catalog.VersionNotFoundError{Name: dep.Name, Version: dep.Compat + ".x", Catalog: catName}
+	}
+	return resolveVersion(pkg, dep.Name, dep.Version, catName)
 }
 
 // reconcile records name's contribution for platform, keeping the highest
@@ -156,19 +269,54 @@ func walk(ctx context.Context, sources []catalog.Named, name, version, catName, 
 // follows roots in tools order, with each root reconciled before its own
 // dependency subtree is walked, so a direct tool's pin outranks a
 // same-version dep discovered later.
-func reconcile(accs map[string]*acc, name, version, catName, digest string, pkg *spec.Package, platform spec.Platform) {
+//
+// A non-empty compat narrows this to the intersection of every compat range
+// seen for name so far: mergeCompat combines the new range with the
+// accumulated one, and the merged range's highest matching version becomes
+// the winner regardless of higher's ordering. compat ranges that don't
+// intersect, or a merged range with no matching version among the deps
+// already reconciled, report SonameConflictError.
+func reconcile(accs map[string]*acc, name, version, compat, catName, digest string, pkg *spec.Package, contrib contribution, platform spec.Platform) error {
 	a, ok := accs[name]
 	if !ok {
 		accs[name] = &acc{
-			version: version, catalog: catName, digest: digest, pkg: pkg,
-			platforms: map[spec.Platform]bool{platform: true},
+			version: version, compat: compat, catalog: catName, digest: digest, pkg: pkg,
+			platforms:    map[spec.Platform]bool{platform: true},
+			onPath:       contrib.onPath,
+			onLoaderPath: contrib.onLoaderPath,
 		}
-		return
+		return nil
 	}
 	a.platforms[platform] = true
+	a.onPath = a.onPath || contrib.onPath
+	a.onLoaderPath = a.onLoaderPath || contrib.onLoaderPath
+
+	conflict := &SonameConflictError{Name: name, A: a.compat, B: compat}
+
+	merged, ok := mergeCompat(a.compat, compat)
+	if !ok {
+		return conflict
+	}
+	if merged != "" {
+		selected := selectCompat(a.pkg.Versions, merged)
+		if selected == "" {
+			return conflict
+		}
+		// Only a non-compat (exact/latest) contribution is range-checked here;
+		// a compat contribution was already picked within a compatible range.
+		// A non-compat version outside the range is a conflict — resolving it
+		// silently instead would let a compat edge quietly override an
+		// explicit/latest pick.
+		if compat == "" && !matchesCompat(version, merged) {
+			return conflict
+		}
+		a.compat, a.version = merged, selected
+		return nil
+	}
 	if higher(version, a.version) {
 		a.version, a.catalog, a.digest, a.pkg = version, catName, digest, pkg
 	}
+	return nil
 }
 
 // supports reports whether pkg's declared platform support covers platform.

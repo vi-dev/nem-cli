@@ -125,3 +125,50 @@ func TestParseRejectsUnknownNestedFields(t *testing.T) {
 		t.Fatalf("action payload unknown field: got %v", err)
 	}
 }
+
+func TestParseLibsKindAndCompat(t *testing.T) {
+	pkg, err := Parse([]byte(`
+schema: 2
+name: gpgme
+libs: [lib]
+deps:
+  - name: gpg
+  - name: openssl
+    kind: link
+    compat: "3"
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(pkg.Libs) != 1 || pkg.Libs[0] != "lib" {
+		t.Fatalf("Libs = %v, want [lib]", pkg.Libs)
+	}
+	if pkg.Deps[0].Kind != DepKindRun {
+		t.Fatalf("gpg dep kind = %q, want run (default)", pkg.Deps[0].Kind)
+	}
+	if pkg.Deps[1].Kind != DepKindLink || pkg.Deps[1].Compat != "3" {
+		t.Fatalf("openssl dep = %+v, want kind=link compat=3", pkg.Deps[1])
+	}
+}
+
+func TestParseRejectsUnknownDepKind(t *testing.T) {
+	_, err := Parse([]byte(`
+schema: 2
+name: a
+deps:
+  - name: b
+    kind: sideways
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`))
+	if err == nil || !strings.Contains(err.Error(), "sideways") {
+		t.Fatalf("want error naming the bad kind, got %v", err)
+	}
+}

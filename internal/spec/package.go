@@ -14,16 +14,28 @@ type Package struct {
 	VersionDiscovery *Discovery     // nil when absent
 	Artifact         Artifact
 	Install          []Action
-	Bins             []string // default ["bin"] applied at parse
+	Bins             []string // dirs or files exposed on PATH; default ["bin"]
+	Libs             []string // dirs contributing to the loader path; nil = none
 	Env              []EnvExport
 	Build            *Build // nil when absent
 }
+
+// DepKind is how a dependent consumes a dependency: run (execute its
+// binaries) or link (link against its libraries).
+type DepKind string
+
+const (
+	DepKindRun  DepKind = "run"
+	DepKindLink DepKind = "link"
+)
 
 // Dep is a dependency reference, optionally version-pinned and
 // platform-constrained.
 type Dep struct {
 	Name, Version string
 	Platforms     []Platform
+	Kind          DepKind // "" parses to DepKindRun
+	Compat        string  // dotted-numeric soname range; link deps only
 }
 
 // VersionEntry is one entry in a package's versions list.
