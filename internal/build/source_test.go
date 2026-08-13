@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -217,5 +218,50 @@ func TestUnpackSourceStripsSingleRoot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "configure")); err != nil {
 		t.Fatalf("expected configure at stripped root: %v", err)
+	}
+}
+
+// bzip2SrcTarBz2 is a bzip2-compressed tar holding src-1.0/configure and
+// src-1.0/main.c. Go's stdlib has no bzip2 writer, so this fixture is
+// pre-compressed (with the bzip2 tool) and embedded to exercise the bzip2
+// branch of unpackSource deterministically, without a host dependency.
+const bzip2SrcTarBz2 = "QlpoOTFBWSZTWRH70xMAAM7/kdKQIIBoY/+IAACQQH/vn4oEAACACAgwANmYV+qUxGm0QDAQA0GQ8ptNBtRFMmgAaAAMgAACSRTJo0BpoaGRpoaDQAKlWqtsmQmwL8r7JroIWqCaEFYoEBECr9vFiFEmVA54ysljLXfR8h5yqlPwzsOkHAqUwCjVCYKKd8CohiUcrDDsbig2QURp4yOZiRoTmJUqSM1WJFJojypPMnKkrDQSVdHZaDIa8EB+r6jaPjQh9d4xbBaGds4op0RkiRX8iHr+7xtNZlamLDS581ZikoNihiXDWmDuQIxF3JFOFCQEfvTEwA=="
+
+func TestUnpackSourceBzip2(t *testing.T) {
+	raw, err := base64.StdEncoding.DecodeString(bzip2SrcTarBz2)
+	if err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	arc := filepath.Join(t.TempDir(), "s.tar.bz2")
+	if err := os.WriteFile(arc, raw, 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	root, err := unpackSource(arc, t.TempDir())
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if filepath.Base(root) != "src-1.0" {
+		t.Fatalf("root = %q, want basename src-1.0", root)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "configure"))
+	if err != nil {
+		t.Fatalf("read configure: %v", err)
+	}
+	if string(got) != "#!/bin/sh\n" {
+		t.Fatalf("configure content = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "main.c")); err != nil {
+		t.Fatalf("expected main.c at stripped root: %v", err)
+	}
+}
+
+func TestUnpackSourceUnsupportedCompression(t *testing.T) {
+	arc := filepath.Join(t.TempDir(), "s.zip")
+	// PK zip magic — a real archive format, but not one unpackSource handles.
+	if err := os.WriteFile(arc, []byte("PK\x03\x04rest-of-file"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := unpackSource(arc, t.TempDir()); err == nil {
+		t.Fatal("expected error for unsupported compression, got nil")
 	}
 }

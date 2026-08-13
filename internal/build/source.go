@@ -2,6 +2,8 @@ package build
 
 import (
 	"archive/tar"
+	"bufio"
+	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -77,12 +79,12 @@ func downloadUnverified(ctx context.Context, client *http.Client, url, dir strin
 	return tmpPath, hex.EncodeToString(sum.Sum(nil)), nil
 }
 
-// unpackSource extracts archivePath, a gzip-compressed tar, into destDir.
-// Every entry is written at its full archive path (no path components are
-// dropped), so when the archive holds one common leading directory (the
-// usual "name-version/" shape of a source release), that directory ends up
-// directly under destDir, and root reports its path. When entries don't
-// share one leading segment, root is destDir itself.
+// unpackSource extracts archivePath, a gzip- or bzip2-compressed tar, into
+// destDir. Every entry is written at its full archive path (no path
+// components are dropped), so when the archive holds one common leading
+// directory (the usual "name-version/" shape of a source release), that
+// directory ends up directly under destDir, and root reports its path. When
+// entries don't share one leading segment, root is destDir itself.
 //
 // Every write is routed through an os.Root rooted at destDir, so a symlink
 // planted by an earlier entry can't redirect a later entry's lexically
@@ -97,11 +99,10 @@ func unpackSource(archivePath, destDir string) (root string, err error) {
 	}
 	defer f.Close()
 
-	gr, err := gzip.NewReader(f)
+	decompressed, err := decompressStream(f)
 	if err != nil {
-		return "", fmt.Errorf("open gzip stream: %w", err)
+		return "", err
 	}
-	defer gr.Close()
 
 	dirRoot, err := os.OpenRoot(destDir)
 	if err != nil {
@@ -109,7 +110,7 @@ func unpackSource(archivePath, destDir string) (root string, err error) {
 	}
 	defer dirRoot.Close()
 
-	tr := tar.NewReader(gr)
+	tr := tar.NewReader(decompressed)
 	var commonSeg string
 	sawEntry, multipleRoots := false, false
 
@@ -174,6 +175,29 @@ func unpackSource(archivePath, destDir string) (root string, err error) {
 		return filepath.Join(destDir, commonSeg), nil
 	}
 	return destDir, nil
+}
+
+// decompressStream wraps r in the decompressor matching its leading magic
+// bytes: gzip (1f 8b) or bzip2 ("BZh"). Source releases ship as one or the
+// other; anything else is rejected rather than fed to tar as-is.
+func decompressStream(r io.Reader) (io.Reader, error) {
+	br := bufio.NewReader(r)
+	magic, err := br.Peek(3)
+	if err != nil {
+		return nil, fmt.Errorf("read archive header: %w", err)
+	}
+	switch {
+	case magic[0] == 0x1f && magic[1] == 0x8b:
+		gr, err := gzip.NewReader(br)
+		if err != nil {
+			return nil, fmt.Errorf("open gzip stream: %w", err)
+		}
+		return gr, nil
+	case magic[0] == 'B' && magic[1] == 'Z' && magic[2] == 'h':
+		return bzip2.NewReader(br), nil
+	default:
+		return nil, fmt.Errorf("unsupported source compression (magic %x); want gzip or bzip2", magic)
+	}
 }
 
 // splitTarPath splits a tar entry's "/"-separated name into its non-empty
