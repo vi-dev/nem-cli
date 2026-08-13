@@ -453,6 +453,50 @@ versions: [v3.4.0]
 	}
 }
 
+// TestResolveBuildRolesRunVsLink mirrors TestResolveRolesRunVsLink but for
+// build.deps: ResolveBuild must assign roles via the same edge path
+// (edgeContribution), not the direct-tool path.
+func TestResolveBuildRolesRunVsLink(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: make
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	pkg := &spec.Package{
+		Schema: 2,
+		Name:   "tool",
+		Build: &spec.Build{
+			Deps: []spec.Dep{
+				{Name: "openssl", Kind: spec.DepKindLink},
+				{Name: "make"},
+			},
+		},
+	}
+	res, err := resolve.ResolveBuild(context.Background(), pkg, namedSources(root))
+	if err != nil {
+		t.Fatalf("ResolveBuild: %v", err)
+	}
+	openssl := entry(t, res, "openssl")
+	makePkg := entry(t, res, "make")
+	if !openssl.OnLoaderPath || openssl.OnPath {
+		t.Fatalf("openssl (link build dep with libs) should be on_loader_path only: %+v", openssl)
+	}
+	if !makePkg.OnPath || makePkg.OnLoaderPath {
+		t.Fatalf("make (run build dep) should be on_path only: %+v", makePkg)
+	}
+}
+
 func TestResolveLinkDepFloatsWithinCompat(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `

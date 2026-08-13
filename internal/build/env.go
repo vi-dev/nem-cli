@@ -1,0 +1,137 @@
+// Package build runs a package's build recipe on the host platform,
+// producing a conformant output tree.
+package build
+
+import (
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/vi-dev/nem-cli/internal/spec"
+)
+
+// resolvedDep is one build dependency after resolution and install: its
+// prefix plus the role that decides its build-env contribution.
+type resolvedDep struct {
+	Name, Version, Prefix string
+	OnPath                bool // its bins join the build PATH
+	OnLoaderPath          bool // a library: contributes -I/-L/rpath/pkgconfig
+	Bins, Libs            []string
+}
+
+// buildContext is the invariant context of one build.
+type buildContext struct {
+	Version    string
+	Platform   spec.Platform
+	Prefix     string // the eventual packages/<name>/<version> install dir
+	StagingDir string
+	OutputDir  string
+}
+
+// composeBuildEnv overlays the build scaffold onto base (the author's own
+// environment): run-dep bins prepended to PATH, and for each library dep the
+// build-time include/lib/pkgconfig flags plus a computed relative rpath.
+// Existing values are appended to, never clobbered.
+func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []string {
+	vars := envToMap(base)
+
+	var pathDirs []string
+	var cppflags, cflags, ldflags, pkgcfg []string
+	newDTags := false
+	for _, d := range deps {
+		if d.OnPath {
+			for _, b := range d.Bins {
+				pathDirs = append(pathDirs, filepath.Join(d.Prefix, b))
+			}
+		}
+		if !d.OnLoaderPath {
+			continue
+		}
+		cppflags = append(cppflags, "-I"+filepath.Join(d.Prefix, "include"))
+		cflags = append(cflags, "-I"+filepath.Join(d.Prefix, "include"))
+		pkgcfg = append(pkgcfg, filepath.Join(d.Prefix, "lib", "pkgconfig"))
+		libs := d.Libs
+		if len(libs) == 0 {
+			libs = []string{"lib"}
+		}
+		for _, lib := range libs {
+			ldflags = append(ldflags, "-L"+filepath.Join(d.Prefix, lib))
+			ldflags = append(ldflags, "-Wl,-rpath,"+relRpath(d.Name, d.Version, lib))
+			if runtime.GOOS == "linux" {
+				newDTags = true
+			}
+		}
+	}
+	if newDTags {
+		ldflags = append(ldflags, "-Wl,--enable-new-dtags")
+	}
+
+	prependPathVar(vars, "PATH", pathDirs)
+	appendVar(vars, "CPPFLAGS", cppflags, " ")
+	appendVar(vars, "CFLAGS", cflags, " ")
+	appendVar(vars, "LDFLAGS", ldflags, " ")
+	appendVar(vars, "PKG_CONFIG_PATH", pkgcfg, string(filepath.ListSeparator))
+
+	vars["NEM_VERSION"] = bctx.Version
+	vars["NEM_OS"] = bctx.Platform.OS
+	vars["NEM_ARCH"] = bctx.Platform.Arch
+	vars["NEM_PREFIX"] = bctx.Prefix
+	vars["NEM_STAGING_DIR"] = bctx.StagingDir
+	vars["NEM_OUTPUT"] = bctx.OutputDir
+
+	return mapToEnv(vars)
+}
+
+// relRpath builds the load-time relative rpath from an installed binary
+// (always three levels above packages/) down to a dependency's lib dir. It
+// is assembled with literal "/" — filepath.Join would Clean the
+// @loader_path/$ORIGIN prefix away.
+func relRpath(dep, version, lib string) string {
+	base := "@loader_path"
+	if runtime.GOOS == "linux" {
+		base = "$ORIGIN"
+	}
+	return base + "/../../../" + dep + "/" + version + "/" + lib
+}
+
+func envToMap(env []string) map[string]string {
+	m := make(map[string]string, len(env))
+	for _, kv := range env {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			m[k] = v
+		}
+	}
+	return m
+}
+
+func mapToEnv(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k, v := range m {
+		out = append(out, k+"="+v)
+	}
+	return out
+}
+
+func prependPathVar(m map[string]string, key string, dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	prefix := strings.Join(dirs, string(filepath.ListSeparator))
+	if cur := m[key]; cur != "" {
+		m[key] = prefix + string(filepath.ListSeparator) + cur
+	} else {
+		m[key] = prefix
+	}
+}
+
+func appendVar(m map[string]string, key string, parts []string, sep string) {
+	if len(parts) == 0 {
+		return
+	}
+	add := strings.Join(parts, sep)
+	if cur := m[key]; cur != "" {
+		m[key] = cur + sep + add
+	} else {
+		m[key] = add
+	}
+}

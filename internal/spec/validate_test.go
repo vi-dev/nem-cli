@@ -121,6 +121,41 @@ versions: [v1.0.0]
 	}
 }
 
+func TestValidateBuildSection(t *testing.T) {
+	base := func(b *Build) *Package {
+		return &Package{
+			Schema: 2, Name: "a",
+			Artifact: Artifact{OCI: ":{{.Version}}"},
+			Install:  []Action{{Extract: &ExtractAction{}}},
+			Versions: []VersionEntry{{Version: "v1.0.0"}},
+			Build:    b,
+		}
+	}
+	good := &Build{Output: "dist", Steps: []struct{ Run string }{{Run: "make"}}}
+	good.Source.URL = "https://ex/{{.Version}}.tgz"
+	good.Deps = []Dep{{Name: "openssl", Kind: DepKindLink, Compat: "3"}}
+	if err := base(good).Validate(); err != nil {
+		t.Fatalf("valid build rejected: %v", err)
+	}
+	for name, mut := range map[string]func(*Build){
+		"empty source":        func(b *Build) { b.Source.URL = "" },
+		"empty output":        func(b *Build) { b.Output = "" },
+		"no steps":            func(b *Build) { b.Steps = nil },
+		"empty run":           func(b *Build) { b.Steps = []struct{ Run string }{{Run: ""}} },
+		"compat no link":      func(b *Build) { b.Deps = []Dep{{Name: "x", Compat: "3"}} },
+		"unrenderable source": func(b *Build) { b.Source.URL = "{{.Bogus}}" },
+		"bad dep name":        func(b *Build) { b.Deps = []Dep{{Name: "Bad", Kind: DepKindLink}} },
+		"bad compat format":   func(b *Build) { b.Deps = []Dep{{Name: "x", Kind: DepKindLink, Compat: "abc"}} },
+	} {
+		b := &Build{Output: "dist", Deps: good.Deps, Steps: []struct{ Run string }{{Run: "make"}}}
+		b.Source.URL = "https://ex/{{.Version}}.tgz"
+		mut(b)
+		if err := base(b).Validate(); err == nil {
+			t.Errorf("%s: want validation error", name)
+		}
+	}
+}
+
 func TestValidateCompatFormat(t *testing.T) {
 	pkg, err := Parse([]byte(`
 schema: 2

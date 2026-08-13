@@ -175,6 +175,12 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 		}
 	}
 
+	return resultFrom(accs, directNames), nil
+}
+
+// resultFrom builds the Result from reconciled accs; directNames marks which
+// entries were top-level tools (nil → none are direct).
+func resultFrom(accs map[string]*acc, directNames map[string]bool) *Result {
 	entries := make([]project.LockEntry, 0, len(accs))
 	pkgs := make(map[string]*spec.Package, len(accs))
 	for name, a := range accs {
@@ -185,20 +191,36 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 			}
 		}
 		entries = append(entries, project.LockEntry{
-			Name:         name,
-			Version:      a.version,
-			Catalog:      a.catalog,
-			Direct:       directNames[name],
-			Platforms:    platforms,
-			Digest:       a.digest,
-			OnPath:       a.onPath,
-			OnLoaderPath: a.onLoaderPath,
+			Name: name, Version: a.version, Catalog: a.catalog,
+			Direct: directNames[name], Platforms: platforms, Digest: a.digest,
+			OnPath: a.onPath, OnLoaderPath: a.onLoaderPath,
 		})
 		pkgs[name] = a.pkg
 	}
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Name < entries[j].Name })
+	return &Result{Entries: entries, Pkgs: pkgs}
+}
 
-	return &Result{Entries: entries, Pkgs: pkgs}, nil
+// ResolveBuild computes the closure of pkg's build.deps across spec.Supported,
+// treating each build.dep as a dependency edge of pkg — the same edge walk (and
+// edgeContribution role assignment) Resolve applies to a package's runtime
+// deps. The package being built is not itself part of the result.
+func ResolveBuild(ctx context.Context, pkg *spec.Package, sources []catalog.Named) (*Result, error) {
+	// A stand-in root whose deps are pkg's build.deps: walkDeps walks these as
+	// edges, so kind drives each dep's role via edgeContribution exactly as for
+	// runtime deps. The stand-in is never reconciled, so it is not in the result.
+	rootPkg := &spec.Package{Name: pkg.Name, Platforms: pkg.Platforms, Deps: pkg.Build.Deps}
+	accs := map[string]*acc{}
+	for _, platform := range spec.Supported {
+		if !supports(rootPkg, platform) {
+			continue
+		}
+		visited := map[string]bool{}
+		if err := walkDeps(ctx, sources, rootPkg, platform, visited, accs); err != nil {
+			return nil, err
+		}
+	}
+	return resultFrom(accs, nil), nil
 }
 
 // walk visits name for platform: it always reconciles name's contribution

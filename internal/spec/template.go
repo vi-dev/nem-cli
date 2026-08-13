@@ -34,6 +34,13 @@ func (p *Package) ArtifactURL(version string, plat Platform) (string, error) {
 	return expand(p.Artifact.URL, templateCtx{Version: version, OS: plat.OS, Arch: plat.Arch})
 }
 
+func (p *Package) BuildSourceURL(version string, plat Platform) (string, error) {
+	if p.Build == nil {
+		return "", fmt.Errorf("package %s has no build section", p.Name)
+	}
+	return expand(p.Build.Source.URL, templateCtx{Version: version, OS: plat.OS, Arch: plat.Arch})
+}
+
 func (p *Package) AssetName(version string, plat Platform) (string, error) {
 	if p.Artifact.GitHub == nil {
 		return "", fmt.Errorf("package %s has no github artifact", p.Name)

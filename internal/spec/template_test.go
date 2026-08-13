@@ -51,6 +51,21 @@ func TestAssetName(t *testing.T) {
 	}
 }
 
+func TestBuildSourceURL(t *testing.T) {
+	pkg := &Package{Build: &Build{}}
+	pkg.Build.Source.URL = "https://ex.com/src-{{.Version}}.tar.gz"
+	got, err := pkg.BuildSourceURL("v1.2.3", Platform{OS: "darwin", Arch: "arm64"})
+	if err != nil {
+		t.Fatalf("BuildSourceURL: %v", err)
+	}
+	if got != "https://ex.com/src-v1.2.3.tar.gz" {
+		t.Fatalf("got %q", got)
+	}
+	if _, err := (&Package{}).BuildSourceURL("v1", Platform{}); err == nil {
+		t.Fatal("want error when Build is nil")
+	}
+}
+
 func TestSha256Lookup(t *testing.T) {
 	p := valid()
 	got, err := p.Sha256("v1.0.0", Platform{"linux", "amd64"})

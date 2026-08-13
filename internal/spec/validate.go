@@ -126,5 +126,35 @@ func (p *Package) Validate() error {
 			return fmt.Errorf("dep %q: invalid compat %q", d.Name, d.Compat)
 		}
 	}
+	if b := p.Build; b != nil {
+		if b.Source.URL == "" {
+			return errors.New("build.source.url is required")
+		}
+		if _, err := expand(b.Source.URL, templateCtx{Version: "v0", OS: "darwin", Arch: "arm64"}); err != nil {
+			return fmt.Errorf("build.source.url: %w", err)
+		}
+		if b.Output == "" {
+			return errors.New("build.output is required")
+		}
+		if len(b.Steps) == 0 {
+			return errors.New("build.steps is required and must be non-empty")
+		}
+		for i, s := range b.Steps {
+			if s.Run == "" {
+				return fmt.Errorf("build.steps[%d]: run is required", i)
+			}
+		}
+		for i, d := range b.Deps {
+			if !NameRE.MatchString(d.Name) {
+				return fmt.Errorf("build.deps[%d]: invalid name %q", i, d.Name)
+			}
+			if d.Compat != "" && d.Kind != DepKindLink {
+				return fmt.Errorf("build.deps[%d] (%s): compat requires kind: link", i, d.Name)
+			}
+			if d.Compat != "" && !CompatRE.MatchString(d.Compat) {
+				return fmt.Errorf("build.deps[%d] (%s): invalid compat %q", i, d.Name, d.Compat)
+			}
+		}
+	}
 	return nil
 }
