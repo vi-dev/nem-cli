@@ -1,6 +1,7 @@
 package build
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,24 +12,38 @@ import (
 	"path/filepath"
 	"slices"
 
+	"oras.land/oras-go/v2/content"
+
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
+	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/resolve"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 // Options tailors one Build invocation.
-type Options struct{ Version, Output, SourceSha256 string }
+type Options struct {
+	Version, Output, SourceSha256 string
+	Push                          string // registry ref; "" = no push
+	DryRun, Force                 bool
+}
 
 // Result is what a successful Build produced.
 type Result struct {
 	OutputDir      string
+	Version        string
 	SourceSha256   string
 	SourceVerified bool
+	Pushed         bool
+	PushedRef      string
 }
+
+// archivesOpener opens the writable archives target for a push; a package
+// var so tests can supply an in-memory store.
+var archivesOpener = ocix.RemoteArchivesRW
 
 // Build runs pkg's build recipe end to end: fetch and unpack its source,
 // resolve and install its build deps, run its steps with the composed
@@ -111,7 +126,47 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, conformanceError(vs)
 	}
 
-	return Result{OutputDir: final, SourceSha256: sha, SourceVerified: verified}, nil
+	result := Result{OutputDir: final, Version: version, SourceSha256: sha, SourceVerified: verified}
+	if opts.Push != "" {
+		ref, pushed, err := pushBuiltArchive(ctx, final, pkg.Name, version, opts, rep)
+		if err != nil {
+			return Result{}, err
+		}
+		result.Pushed = pushed
+		result.PushedRef = ref
+	}
+	return result, nil
+}
+
+// pushBuiltArchive tars final and publishes it as version's host-platform
+// entry of the archive index at opts.Push. On --dry-run it reports the plan
+// and pushes nothing.
+func pushBuiltArchive(ctx context.Context, final, name, version string, opts Options, rep report.Reporter) (string, bool, error) {
+	archivesRef, err := ocix.ArchivesRef(opts.Push, name)
+	if err != nil {
+		return "", false, err
+	}
+	var buf bytes.Buffer
+	if err := tarGzDir(&buf, final); err != nil {
+		return "", false, fmt.Errorf("archive %s: %w", final, err)
+	}
+	plat := spec.Current()
+	if opts.DryRun {
+		d := content.NewDescriptorFromBytes(ocix.MediaTypeArchive, buf.Bytes())
+		rep.Info("dry-run: would push %s:%s (%s) %s", archivesRef, version, plat, d.Digest)
+		return archivesRef, false, nil
+	}
+	target, err := archivesOpener(opts.Push, name)
+	if err != nil {
+		return "", false, err
+	}
+	if _, pushed, err := ocix.PushArchive(ctx, target, version, plat, buf.Bytes(), opts.Force); err != nil {
+		return "", false, err
+	} else if !pushed {
+		rep.Info("archive %s:%s (%s) unchanged", archivesRef, version, plat)
+		return archivesRef, false, nil
+	}
+	return archivesRef, true, nil
 }
 
 // fetchBuildSource resolves the source sha256 policy (an explicit override,

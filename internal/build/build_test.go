@@ -3,13 +3,19 @@ package build
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/oci"
+
 	"github.com/vi-dev/nem-cli/internal/home"
+	"github.com/vi-dev/nem-cli/internal/install"
+	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -75,5 +81,104 @@ func TestBuildFailsOnStepError(t *testing.T) {
 	_, err := Build(context.Background(), h, nil, nil, pkg, Options{Version: "v1"}, report.New(&b, &b, report.Options{}), &b, &b)
 	if err == nil {
 		t.Fatal("want error when a build step exits non-zero")
+	}
+}
+
+func TestBuildPushRoundTripsThroughArchive(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return nemHomeDir
+		}
+		return ""
+	})
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := archivesOpener
+	archivesOpener = func(catalogRef, name string) (oras.Target, error) { return store, nil }
+	defer func() { archivesOpener = restore }()
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1.0.0"}},
+		Build: &spec.Build{Output: "out", Steps: []struct{ Run string }{
+			{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hello > "$NEM_OUTPUT/bin/tool"`},
+		}}}
+	pkg.Build.Source.URL = srv.URL
+
+	var b bytes.Buffer
+	res, err := Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1.0.0", Push: "ghcr.io/x/cat:v2"},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err != nil {
+		t.Fatalf("build --push: %v\n%s", err, b.String())
+	}
+	if !res.Pushed {
+		t.Fatal("Result.Pushed should be true")
+	}
+
+	// consumer read path: pull the pushed archive and install it
+	pulled, err := ocix.PullArchiveFrom(context.Background(), store, "v1.0.0", spec.Current(), t.TempDir())
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if err := install.Install(context.Background(), h, pkg, "v1.0.0", "cat", pulled); err != nil {
+		t.Fatalf("install pulled archive: %v", err)
+	}
+	dir, _ := h.PackageDir("tool", "v1.0.0")
+	if got, _ := os.ReadFile(filepath.Join(dir, "bin", "tool")); string(got) != "hello\n" {
+		t.Fatalf("installed tool = %q, want hello", got)
+	}
+}
+
+func TestBuildDryRunPushesNothing(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return nemHomeDir
+		}
+		return ""
+	})
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := archivesOpener
+	archivesOpener = func(catalogRef, name string) (oras.Target, error) { return store, nil }
+	defer func() { archivesOpener = restore }()
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1.0.0"}},
+		Build: &spec.Build{Output: "out", Steps: []struct{ Run string }{
+			{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hello > "$NEM_OUTPUT/bin/tool"`},
+		}}}
+	pkg.Build.Source.URL = srv.URL
+
+	var b bytes.Buffer
+	res, err := Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1.0.0", Push: "ghcr.io/x/cat:v2", DryRun: true},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err != nil {
+		t.Fatalf("build --push --dry-run: %v\n%s", err, b.String())
+	}
+	if res.Pushed {
+		t.Fatal("Result.Pushed should be false on dry-run")
+	}
+
+	if _, err := ocix.PullArchiveFrom(context.Background(), store, "v1.0.0", spec.Current(), t.TempDir()); !errors.Is(err, ocix.ErrArchiveNotFound) {
+		t.Fatalf("dry-run pushed something: pull err = %v, want %v", err, ocix.ErrArchiveNotFound)
 	}
 }
