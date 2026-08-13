@@ -42,11 +42,12 @@ func TestComposeBuildEnv(t *testing.T) {
 	if !strings.Contains(m["LDFLAGS"], "-L/nh/packages/openssl/v3.4.0/lib") {
 		t.Fatalf("LDFLAGS -L: %q", m["LDFLAGS"])
 	}
-	wantRpath := "@loader_path/../../../openssl/v3.4.0/lib"
+	wantRpath := "-Wl,-rpath,@loader_path/../../../openssl/v3.4.0/lib"
 	if runtime.GOOS == "linux" {
-		wantRpath = "$ORIGIN/../../../openssl/v3.4.0/lib"
+		// $ORIGIN doubled for make and single-quoted for the shell.
+		wantRpath = "-Wl,-rpath,'$$ORIGIN/../../../openssl/v3.4.0/lib'"
 	}
-	if !strings.Contains(m["LDFLAGS"], "-Wl,-rpath,"+wantRpath) {
+	if !strings.Contains(m["LDFLAGS"], wantRpath) {
 		t.Fatalf("LDFLAGS rpath = %q, want %s", m["LDFLAGS"], wantRpath)
 	}
 	for k, want := range map[string]string{

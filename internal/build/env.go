@@ -56,7 +56,7 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 		}
 		for _, lib := range libs {
 			ldflags = append(ldflags, "-L"+filepath.Join(d.Prefix, lib))
-			ldflags = append(ldflags, "-Wl,-rpath,"+relRpath(d.Name, d.Version, lib))
+			ldflags = append(ldflags, rpathFlag(d.Name, d.Version, lib))
 			if runtime.GOOS == "linux" {
 				newDTags = true
 			}
@@ -82,16 +82,22 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 	return mapToEnv(vars)
 }
 
-// relRpath builds the load-time relative rpath from an installed binary
-// (always three levels above packages/) down to a dependency's lib dir. It
-// is assembled with literal "/" — filepath.Join would Clean the
-// @loader_path/$ORIGIN prefix away.
-func relRpath(dep, version, lib string) string {
-	base := "@loader_path"
+// rpathFlag builds the -Wl,-rpath linker flag that bakes a load-time relative
+// path from an installed binary (always three levels above packages/) down to
+// a dependency's lib dir. The path is assembled with literal "/" —
+// filepath.Join would Clean the @loader_path/$ORIGIN prefix away.
+//
+// On Linux the prefix is $ORIGIN, which must reach the linker literally after
+// passing through make and the shell: make expands $O (an undefined make
+// variable) unless the dollar is doubled, and the shell expands $ORIGIN unless
+// it is single-quoted. Both together yield the intended $ORIGIN. macOS uses
+// @loader_path, which has no $ and needs neither.
+func rpathFlag(dep, version, lib string) string {
+	rel := "/../../../" + dep + "/" + version + "/" + lib
 	if runtime.GOOS == "linux" {
-		base = "$ORIGIN"
+		return "-Wl,-rpath,'$$ORIGIN" + rel + "'"
 	}
-	return base + "/../../../" + dep + "/" + version + "/" + lib
+	return "-Wl,-rpath,@loader_path" + rel
 }
 
 func envToMap(env []string) map[string]string {
