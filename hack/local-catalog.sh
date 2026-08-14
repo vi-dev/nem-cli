@@ -14,7 +14,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONTAINER=nem-local-registry
 IMAGE=registry:3
 ADDR=127.0.0.1:5001
-REF=localhost:5001/nem-local-catalog:v2
+PUBLISH_REF=localhost:5001/nem-local-catalog
+CATALOG_REF=localhost:5001/nem-local-catalog:v2
 CATALOG_NAME=local
 DEFAULT_DIR="$REPO_ROOT/../nem-official-catalog"
 NEM=${NEM:-go run ./cmd/nem}
@@ -65,13 +66,13 @@ up() {
       || die "failed to start registry (is port 5001 already in use?)"
   fi
   wait_ready
-  echo "publishing $dir -> $REF"
-  run_nem catalog publish "$REF" "$dir"
+  echo "publishing $dir -> $PUBLISH_REF"
+  run_nem catalog publish "$PUBLISH_REF" "$dir" --tag v2
   run_nem catalog remove "$CATALOG_NAME" >/dev/null 2>&1 || true
-  run_nem catalog add "$CATALOG_NAME" "$REF"
+  run_nem catalog add "$CATALOG_NAME" "$CATALOG_REF"
   run_nem catalog update "$CATALOG_NAME"
   echo
-  echo "catalog '$CATALOG_NAME' now resolves from $REF"
+  echo "catalog '$CATALOG_NAME' now resolves from $CATALOG_REF"
   echo "tear down with: $0 down"
 }
 
@@ -80,7 +81,7 @@ publish() {
   dir="$(resolve_catalog_dir "${1:-}")"
   require_docker
   registry_running || die "registry not running; run '$0 up' first"
-  run_nem catalog publish "$REF" "$dir"
+  run_nem catalog publish "$PUBLISH_REF" "$dir" --tag v2
   run_nem catalog update "$CATALOG_NAME"
 }
 

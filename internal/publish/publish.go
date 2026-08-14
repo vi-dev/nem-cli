@@ -71,7 +71,7 @@ type pkgEntry struct {
 // and returns before the target is opened. A package whose manifest
 // content already exists in the target is skipped unless Force is set.
 func Publish(ctx context.Context, dir, ref string, opts Options, r report.Reporter) error {
-	if err := ocix.ValidateRef(ref); err != nil {
+	if err := ocix.ValidateBaseRef(ref); err != nil {
 		return err
 	}
 

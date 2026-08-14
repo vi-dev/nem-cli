@@ -42,7 +42,7 @@ func TestCatalogPublishPushesToTarget(t *testing.T) {
 	nemHome := t.TempDir()
 	fixtureDir := writeLintFixture(t, map[string]string{"go": publishFixtureGoPkg})
 
-	if _, _, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat:v2", fixtureDir, "--tag", "v2"); err != nil {
+	if _, _, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat", fixtureDir, "--tag", "v2"); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 	if _, err := store.Resolve(ctx, "v2"); err != nil {
@@ -65,7 +65,7 @@ func TestCatalogPublishDryRunWritesNothing(t *testing.T) {
 	nemHome := t.TempDir()
 	fixtureDir := writeLintFixture(t, map[string]string{"go": publishFixtureGoPkg})
 
-	_, errb, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat:v2", fixtureDir, "--dry-run")
+	_, errb, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat", fixtureDir, "--dry-run")
 	if err != nil {
 		t.Fatalf("publish --dry-run: %v", err)
 	}
@@ -77,11 +77,11 @@ func TestCatalogPublishDryRunWritesNothing(t *testing.T) {
 	}
 }
 
-func TestCatalogPublishRejectsBareRef(t *testing.T) {
+func TestCatalogPublishRejectsTaggedRef(t *testing.T) {
 	nemHome := t.TempDir()
 	fixtureDir := writeLintFixture(t, map[string]string{"go": publishFixtureGoPkg})
 
-	if _, _, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat", fixtureDir); err == nil {
-		t.Fatal("bare oci ref must be rejected")
+	if _, _, err := runNem(t, nemHome, "catalog", "publish", "example.com/cat:v2", fixtureDir); err == nil {
+		t.Fatal("tagged oci ref must be rejected")
 	}
 }

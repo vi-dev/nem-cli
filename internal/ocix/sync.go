@@ -35,6 +35,21 @@ func ValidateRef(ref string) error {
 	return nil
 }
 
+// ValidateBaseRef checks that ref names a bare repository — no tag or
+// digest. Publish writes the repository and moves the tags named via
+// --tag, so a tag on the ref would be dead syntax at best and misleading
+// at worst (":v2-staging" would not move v2-staging).
+func ValidateBaseRef(ref string) error {
+	parsed, err := registry.ParseReference(ref)
+	if err != nil {
+		return fmt.Errorf("parse oci ref %q: %w", ref, err)
+	}
+	if parsed.Reference != "" {
+		return fmt.Errorf("oci ref %q must be a bare repository ref", ref)
+	}
+	return nil
+}
+
 // loopbackRegistry reports whether host (the registry part of a parsed
 // reference, possibly with a port) names the local machine: "localhost"
 // or a loopback IP (127.0.0.0/8, ::1).

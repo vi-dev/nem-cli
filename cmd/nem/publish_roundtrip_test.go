@@ -45,7 +45,7 @@ func TestPublishToUseRoundTrip(t *testing.T) {
 		t.Fatalf("lint: %v\n%s", err, errb)
 	}
 
-	if _, errb, err := runNem(t, pubNemHome, "catalog", "publish", "example.com/cat:v2", catalogRoot, "--tag", "v2"); err != nil {
+	if _, errb, err := runNem(t, pubNemHome, "catalog", "publish", "example.com/cat", catalogRoot, "--tag", "v2"); err != nil {
 		t.Fatalf("publish: %v\n%s", err, errb)
 	}
 	if _, err := shared.Resolve(ctx, "v2"); err != nil {

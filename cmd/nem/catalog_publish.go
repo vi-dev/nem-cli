@@ -3,7 +3,6 @@ package main
 import (
 	"github.com/spf13/cobra"
 
-	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/publish"
 )
 
@@ -19,9 +18,6 @@ func newCatalogPublishCmd() *cobra.Command {
 			dir := "."
 			if len(args) == 2 {
 				dir = args[1]
-			}
-			if err := ocix.ValidateRef(ref); err != nil {
-				return err
 			}
 			return publish.Publish(cmd.Context(), dir, ref, publish.Options{Tags: tags, DryRun: dryRun, Force: force}, console)
 		},
