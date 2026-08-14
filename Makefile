@@ -23,6 +23,12 @@ local-catalog-down:
 local-catalog-status:
 	hack/local-catalog.sh status
 
+# Point git at the tracked hooks so commit subjects are checked locally
+# instead of failing in CI. One-time, per clone.
+.PHONY: hooks
+hooks:
+	git config core.hooksPath .githooks
+
 .PHONY: check
 check:
 	env -u GOROOT go vet ./...
