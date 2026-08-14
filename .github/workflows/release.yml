@@ -1,0 +1,78 @@
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Tag to build and release (e.g. v0.1.0)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
+
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610  # v0
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke-test image
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euxo pipefail
+          docker pull "ghcr.io/vi-dev/nem-cli:${TAG}"
+          docker run --rm "ghcr.io/vi-dev/nem-cli:${TAG}" version
+          docker run --rm --entrypoint sh "ghcr.io/vi-dev/nem-cli:${TAG}" -c \
+            'command -v cc && command -v make && command -v perl && command -v ar \
+             && command -v bzip2 && command -v xz && [ "$NEM_HOME" = "/root/.nem" ]'
+
+      - name: Attest container images
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6  # v4
+        with:
+          subject-checksums: ./dist/digests.txt
+          push-to-registry: true
+
+      - name: Attest release archives
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6  # v4
+        with:
+          subject-checksums: ./dist/checksums.txt

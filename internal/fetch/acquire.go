@@ -12,10 +12,11 @@ import (
 	"strings"
 	"text/template"
 
+	"oras.land/oras-go/v2/registry"
+
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
-	"oras.land/oras-go/v2/registry"
 )
 
 // Source tells Acquire where the package came from.

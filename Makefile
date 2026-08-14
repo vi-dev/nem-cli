@@ -22,3 +22,19 @@ local-catalog-down:
 
 local-catalog-status:
 	hack/local-catalog.sh status
+
+.PHONY: check
+check:
+	env -u GOROOT go vet ./...
+	env -u GOROOT go test -race -shuffle=on ./...
+
+# Snapshot builds have no Sigstore identity available and are never
+# published, so signing is skipped rather than blocking on OIDC login.
+.PHONY: snapshot
+snapshot:
+	env -u GOROOT goreleaser release --snapshot --clean --skip=sign
+
+.PHONY: test-install
+# Run install script unit tests
+test-install:
+	bats test/install.bats

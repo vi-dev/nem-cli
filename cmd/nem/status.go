@@ -16,14 +16,14 @@ func newStatusCmd() *cobra.Command {
 		Short: "Show declared tools and environment variables",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runStatus(cmd, global)
+			return runStatus(global)
 		},
 	}
 	cmd.Flags().BoolVarP(&global, "global", "g", false, "show the global scope")
 	return cmd
 }
 
-func runStatus(cmd *cobra.Command, global bool) error {
+func runStatus(global bool) error {
 	manifestP, err := manifestPath(global, false)
 	if err != nil {
 		return err

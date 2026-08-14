@@ -23,7 +23,7 @@ func stripANSI(s string) string {
 	for i := 0; i < len(s); i++ {
 		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
 			j := i + 2
-			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+			for j < len(s) && (s[j] < 'A' || s[j] > 'Z') && (s[j] < 'a' || s[j] > 'z') {
 				j++
 			}
 			i = j

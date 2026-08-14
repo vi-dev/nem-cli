@@ -1,0 +1,64 @@
+version: 2
+
+project_name: nem
+
+before:
+  hooks:
+    - go test -race ./...
+
+builds:
+  - id: nem
+    main: ./cmd/nem
+    binary: nem
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Summary }}
+      - -X main.buildTime={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+# A literal version slot keeps the asset name fixed across builds — install.sh
+# derives this name from the tag alone.
+archives:
+  - id: nem
+    name_template: "{{ .ProjectName }}_unstable_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+dockers_v2:
+  - id: nem
+    images:
+      - ghcr.io/vi-dev/nem-cli
+    tags:
+      - "unstable"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile
+    labels:
+      org.opencontainers.image.source: https://github.com/vi-dev/nem-cli
+      org.opencontainers.image.version: "unstable"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MPL-2.0
+      org.opencontainers.image.description: "Manage your development environment (unstable build from main)"
+
+changelog:
+  disable: true
+
+# The workflow publishes the rolling release with `gh`; GoReleaser only builds
+# and pushes the image. Combined with --skip=validate this runs a normal (not
+# snapshot) release on an untagged commit, so dockers_v2 pushes a real
+# multi-arch manifest.
+release:
+  disable: true

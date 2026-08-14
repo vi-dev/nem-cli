@@ -1,0 +1,70 @@
+name: Verify Installer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - install.sh
+      - test/install.bats
+      - .github/workflows/verify-installer.yml
+  pull_request:
+    paths:
+      - install.sh
+      - test/install.bats
+      - .github/workflows/verify-installer.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-installer-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: shellcheck install.sh
+
+  bats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+      - run: make test-install
+
+  install:
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        channel: [stable, unstable]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Run install.sh (${{ matrix.channel }})
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEM_VERSION: ${{ matrix.channel == 'unstable' && 'unstable' || '' }}
+        run: NEM_INSTALL_DIR="$RUNNER_TEMP/nem-bin" bash install.sh
+      - name: Verify binary (${{ matrix.channel }})
+        run: |
+          set -eu
+          ver="$("$RUNNER_TEMP/nem-bin/nem" --version)"
+          echo "reported version: ${ver}"
+          [ -n "${ver}" ] || { echo "empty version output"; exit 1; }
+          if [ "${{ matrix.channel }}" = "unstable" ]; then
+            # A rolling tag can hijack `git describe` and stamp builds with the
+            # tag name instead of the last release.
+            case "${ver}" in
+              unstable*|*-unstable*)
+                echo "version was hijacked by the rolling tag: ${ver}"
+                exit 1
+                ;;
+            esac
+          fi

@@ -1,0 +1,101 @@
+version: 2
+
+project_name: nem
+
+before:
+  hooks:
+    - go test -race ./...
+
+builds:
+  - id: nem
+    main: ./cmd/nem
+    binary: nem
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.buildTime={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: nem
+    name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    files:
+      - README.md
+      - LICENSE
+
+# `.Prerelease` is empty for stable releases and non-empty (e.g. "rc1") for
+# prereleases; empty tags are silently dropped, so floating tags only publish
+# on stable releases.
+dockers_v2:
+  - id: nem
+    images:
+      - ghcr.io/vi-dev/nem-cli
+    tags:
+      - "v{{ .Version }}"
+      - "{{ if eq .Prerelease \"\" }}v{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if eq .Prerelease \"\" }}v{{ .Major }}{{ end }}"
+      - "{{ if eq .Prerelease \"\" }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile
+    sbom: true
+    labels:
+      org.opencontainers.image.source: https://github.com/vi-dev/nem-cli
+      org.opencontainers.image.version: "v{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MPL-2.0
+      org.opencontainers.image.description: "Manage your development environment"
+
+docker_signs:
+  - id: ghcr-cosign
+    cmd: cosign
+    args: ["sign", "--yes", "${artifact}@${digest}"]
+    output: true
+
+docker_digest:
+  name_template: "digests.txt"
+
+sboms:
+  - id: archive-sboms
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.spdx.json"
+    cmd: syft
+    args: ["${artifact}", "--output", "spdx-json=${document}"]
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+signs:
+  - id: checksums
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    cmd: cosign
+    args: ["sign-blob", "--yes", "--bundle=${signature}", "${artifact}"]
+
+# Only affects `make snapshot`. Without this, local snapshot builds are named
+# with GoReleaser's default `-devel` suffix.
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# release-please owns the changelog and the release notes; GoReleaser must not
+# overwrite them.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: vi-dev
+    name: nem-cli
+  draft: false
+  prerelease: auto
+  mode: keep-existing

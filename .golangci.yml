@@ -1,0 +1,35 @@
+version: "2"
+
+linters:
+  enable:
+    - unparam
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+        # os.Root postdates the upstream list; same intent as *os.File above.
+        - (*os.Root).Close
+        - (*compress/gzip.Reader).Close
+        - (*archive/zip.ReadCloser).Close
+        - os.Remove
+        - os.RemoveAll
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      - path: _test\.go$
+        linters:
+          - errcheck
+          # Test helpers legitimately take arguments that never vary.
+          - unparam
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/vi-dev/nem-cli

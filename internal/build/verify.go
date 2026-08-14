@@ -69,12 +69,12 @@ func binaryKind(path string) (binKind, error) {
 	if _, err := f.Read(magic[:]); err != nil {
 		return notBinary, nil // too short to be a binary
 	}
-	switch {
-	case magic == [4]byte{0x7f, 'E', 'L', 'F'}:
+	switch magic {
+	case [4]byte{0x7f, 'E', 'L', 'F'}:
 		return elf, nil
-	case magic == [4]byte{0xfe, 0xed, 0xfa, 0xce}, magic == [4]byte{0xfe, 0xed, 0xfa, 0xcf},
-		magic == [4]byte{0xce, 0xfa, 0xed, 0xfe}, magic == [4]byte{0xcf, 0xfa, 0xed, 0xfe},
-		magic == [4]byte{0xca, 0xfe, 0xba, 0xbe}: // fat
+	case [4]byte{0xfe, 0xed, 0xfa, 0xce}, [4]byte{0xfe, 0xed, 0xfa, 0xcf},
+		[4]byte{0xce, 0xfa, 0xed, 0xfe}, [4]byte{0xcf, 0xfa, 0xed, 0xfe},
+		[4]byte{0xca, 0xfe, 0xba, 0xbe}: // fat
 		return machO, nil
 	}
 	return notBinary, nil
@@ -160,9 +160,7 @@ func readelfRefs(path string) ([]string, error) {
 				if i := strings.LastIndex(line, "["); i != -1 {
 					if j := strings.Index(line[i:], "]"); j != -1 {
 						// RPATH/RUNPATH may hold colon-separated dirs.
-						for _, r := range strings.Split(line[i+1:i+j], ":") {
-							refs = append(refs, r)
-						}
+						refs = append(refs, strings.Split(line[i+1:i+j], ":")...)
 					}
 				}
 			}

@@ -1,0 +1,92 @@
+name: Unstable
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - LICENSE
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: unstable-${{ github.ref }}
+  # Cancelling mid-upload can leave the archives and checksums.txt mismatched
+  # until the next push, so publish runs must serialize.
+  cancel-in-progress: false
+
+jobs:
+  unstable:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+
+      - name: Drop the rolling tag locally so the version describes the last release
+        run: git tag -d unstable || true
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4
+
+      - uses: docker/login-action@abd2ef45e78c5afb21d64d4ca52ee8550d9572c7  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release -f .goreleaser.unstable.yml --clean --skip=validate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke-test unstable image
+        run: |
+          set -euxo pipefail
+          docker pull ghcr.io/vi-dev/nem-cli:unstable
+          docker run --rm ghcr.io/vi-dev/nem-cli:unstable version
+          docker run --rm --entrypoint sh ghcr.io/vi-dev/nem-cli:unstable -c \
+            'command -v cc && command -v make && command -v perl && command -v ar \
+             && command -v bzip2 && command -v xz && [ "$NEM_HOME" = "/root/.nem" ]'
+
+      - name: Publish rolling unstable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euxo pipefail
+
+          NOTES="Unstable build from main (${GITHUB_SHA}).
+
+          Not a released version — it tracks main and is replaced on every merge.
+
+          Install with:
+
+              curl -fsSL https://raw.githubusercontent.com/vi-dev/nem-cli/main/install.sh | NEM_VERSION=unstable bash
+          "
+
+          # Upsert so the release is never briefly absent, and move the tag last
+          # so a partial failure leaves it behind a valid release rather than
+          # ahead of a stale one.
+          if gh release view unstable >/dev/null 2>&1; then
+            gh release upload unstable dist/nem_unstable_*.tar.gz dist/checksums.txt --clobber
+            gh release edit unstable --prerelease --notes "${NOTES}"
+          else
+            gh release create unstable --prerelease --target "${GITHUB_SHA}" \
+              --title "Unstable (main)" --notes "${NOTES}" \
+              dist/nem_unstable_*.tar.gz dist/checksums.txt
+          fi
+
+          git tag -f unstable
+          git push -f origin refs/tags/unstable

@@ -9,10 +9,11 @@ import (
 	"testing"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-	"github.com/vi-dev/nem-cli/internal/spec"
 	"oras.land/oras-go/v2/content/oci"
 	"oras.land/oras-go/v2/errdef"
 	"oras.land/oras-go/v2/registry/remote/errcode"
+
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 func TestPullArchiveFromReturnsRightPlatform(t *testing.T) {

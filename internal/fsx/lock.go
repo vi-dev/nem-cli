@@ -24,7 +24,9 @@ func Lock(path string) (func(), error) {
 		return nil, fmt.Errorf("acquire lock: %w", err)
 	}
 	return func() {
-		unix.Flock(int(f.Fd()), unix.LOCK_UN)
+		// Closing the fd releases the lock, so a failed explicit unlock is
+		// not actionable.
+		_ = unix.Flock(int(f.Fd()), unix.LOCK_UN)
 		f.Close()
 	}, nil
 }
