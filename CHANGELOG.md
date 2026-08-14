@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/vi-dev/nem-cli/compare/v0.1.0...v0.1.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* Attest a single image digest instead of every tag ([75cf3f1](https://github.com/vi-dev/nem-cli/commit/75cf3f151f00afe4ce6eda0b80f7b9376ec71e1d))
+
 ## [0.1.0](https://github.com/vi-dev/nem-cli/compare/v0.0.0...v0.1.0) (2026-08-14)
 
 
