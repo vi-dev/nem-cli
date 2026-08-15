@@ -12,6 +12,11 @@ var EnvNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // CompatRE validates a dep's soname-compat range: a dotted numeric prefix.
 var CompatRE = regexp.MustCompile(`^\d+(\.\d+)*$`)
 
+// TagRE validates versions against the OCI tag grammar: a version doubles
+// as the tag on the catalog's archives repo (<base>/archives/<name>:<version>),
+// so characters like "+" would break every registry fetch.
+var TagRE = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
+
 // SupportedBy expands the package's platform constraint to full os/arch
 // pairs: the declared subset, or all four when unconstrained.
 func (p *Package) SupportedBy() []Platform {
@@ -80,6 +85,9 @@ func (p *Package) Validate() error {
 	for i, v := range p.Versions {
 		if v.Version == "" {
 			return fmt.Errorf("versions[%d]: missing version", i)
+		}
+		if !TagRE.MatchString(v.Version) {
+			return fmt.Errorf("versions[%d] (%s): version is not a valid oci tag (it names the package's archive tag)", i, v.Version)
 		}
 		if v.Sha256 == nil {
 			if p.Artifact.OCI == "" {

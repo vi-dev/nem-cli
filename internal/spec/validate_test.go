@@ -73,6 +73,15 @@ func TestValidateRules(t *testing.T) {
 				"linux/arm64": "c", "linux/amd64": "d",
 			}}}
 		}, "missing version"},
+		{"version with plus", func(p *Package) {
+			p.Versions[0].Version = "25.0.4+7"
+		}, "oci tag"},
+		{"version leading separator", func(p *Package) {
+			p.Versions[0].Version = "-1.0.0"
+		}, "oci tag"},
+		{"version too long", func(p *Package) {
+			p.Versions[0].Version = strings.Repeat("9", 129)
+		}, "oci tag"},
 	}
 	for _, c := range cases {
 		p := valid()
@@ -80,6 +89,16 @@ func TestValidateRules(t *testing.T) {
 		err := p.Validate()
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want mention of %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestValidateVersionTagSpellings(t *testing.T) {
+	for _, v := range []string{"v1.0.0", "25.0.4_7", "2024.05.01-rc.1", "_1"} {
+		p := valid()
+		p.Versions[0].Version = v
+		if err := p.Validate(); err != nil {
+			t.Errorf("version %q rejected: %v", v, err)
 		}
 	}
 }
