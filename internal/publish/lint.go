@@ -103,6 +103,24 @@ func lintPackage(id, path string, checkDirName bool) []Finding {
 	}
 	findings = append(findings, lintTemplates(id, pkg)...)
 	findings = append(findings, lintReservedEnv(id, pkg)...)
+	findings = append(findings, lintVersionOrder(id, pkg)...)
+	return findings
+}
+
+// lintVersionOrder reports every adjacent pair of version entries that is
+// not strictly newest-first, including pairs that are the same version
+// under two spellings (v1.3.1 beside 1.3.1).
+func lintVersionOrder(id string, pkg *spec.Package) []Finding {
+	var findings []Finding
+	for i := 1; i < len(pkg.Versions); i++ {
+		prev, cur := pkg.Versions[i-1].Version, pkg.Versions[i].Version
+		if spec.CompareVersions(prev, cur) <= 0 {
+			findings = append(findings, Finding{
+				Pkg: id,
+				Msg: fmt.Sprintf("versions are not newest-first: %s precedes %s", prev, cur),
+			})
+		}
+	}
 	return findings
 }
 

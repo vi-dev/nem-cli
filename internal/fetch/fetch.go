@@ -91,6 +91,56 @@ func Download(ctx context.Context, client *http.Client, url, wantSHA256, dir str
 	return tmpPath, nil
 }
 
+// DownloadUnverified streams url's body into a fresh temp file in dir,
+// hashing as it goes, without comparing against any expected digest. It
+// returns the temp file's path and the computed hex digest, for callers
+// that pin checksums rather than verify them.
+func DownloadUnverified(ctx context.Context, client *http.Client, url, dir string, meta Meta, task report.Task) (string, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", fmt.Errorf("build request for %s: %w", url, err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("fetch %s: %w", url, err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound, http.StatusGone:
+		return "", "", &ArtifactNotFoundError{Name: meta.Name, Version: meta.Version, Platform: meta.Platform.String(), Missing: "url"}
+	default:
+		return "", "", fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
+	}
+
+	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*.tmp")
+	if err != nil {
+		return "", "", fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tmpPath := f.Name()
+
+	sum := sha256.New()
+	dst := io.MultiWriter(f, sum)
+	if task != nil {
+		dst = io.MultiWriter(f, sum, newProgressWriter(task, resp.ContentLength))
+	}
+	written, copyErr := io.Copy(dst, resp.Body)
+	closeErr := f.Close()
+	if task != nil {
+		task.Progress(written, resp.ContentLength)
+	}
+	if copyErr != nil {
+		os.Remove(tmpPath)
+		return "", "", fmt.Errorf("download %s: %w", url, copyErr)
+	}
+	if closeErr != nil {
+		os.Remove(tmpPath)
+		return "", "", fmt.Errorf("close temp file %s: %w", tmpPath, closeErr)
+	}
+	return tmpPath, hex.EncodeToString(sum.Sum(nil)), nil
+}
+
 // progressWriter reports download progress to a report.Task every
 // progressChunk bytes written.
 type progressWriter struct {

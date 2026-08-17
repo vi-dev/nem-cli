@@ -75,7 +75,7 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, err
 	}
 	if !verified {
-		rep.Info("record for reproducibility: sourceSha256: %s", sha)
+		rep.Info("Record for reproducibility: sourceSha256: %s", sha)
 	}
 
 	srcDir := filepath.Join(staging, "src")

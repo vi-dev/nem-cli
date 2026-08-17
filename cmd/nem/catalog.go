@@ -31,7 +31,7 @@ func newCatalogCmd() *cobra.Command {
 		Use:   "catalog",
 		Short: "Manage catalogs",
 	}
-	cmd.AddCommand(newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogLintCmd(), newCatalogPublishCmd(), newCatalogDisableCmd(), newCatalogEnableCmd(), newCatalogBuildCmd())
+	cmd.AddCommand(newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogLintCmd(), newCatalogPublishCmd(), newCatalogDisableCmd(), newCatalogEnableCmd(), newCatalogBuildCmd(), newCatalogFmtCmd(), newCatalogOutdatedCmd(), newCatalogBumpCmd())
 	return cmd
 }
 

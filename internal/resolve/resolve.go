@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"golang.org/x/mod/semver"
-
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/spec"
@@ -379,20 +377,8 @@ func resolveVersion(pkg *spec.Package, name, version, catName string) (string, e
 	return "", &catalog.VersionNotFoundError{Name: name, Version: version, Catalog: catName}
 }
 
-// higher reports whether candidate outranks current: by semver when both
-// parse as valid semver (accepting a missing leading "v"), else
-// lexicographically.
+// higher reports whether candidate outranks current, using the shared
+// catalog version ordering.
 func higher(candidate, current string) bool {
-	cv, curv := withV(candidate), withV(current)
-	if semver.IsValid(cv) && semver.IsValid(curv) {
-		return semver.Compare(cv, curv) > 0
-	}
-	return strings.Compare(candidate, current) > 0
-}
-
-func withV(v string) string {
-	if strings.HasPrefix(v, "v") {
-		return v
-	}
-	return "v" + v
+	return spec.CompareVersions(candidate, current) > 0
 }

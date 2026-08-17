@@ -32,6 +32,21 @@ func pkgWithEnv(name, value string) string {
 
 var pkgMissingOnePlatformSha = strings.Replace(validGoPkg, "      linux/amd64: \"ddd\"\n", "", 1)
 
+// pkgWithVersions swaps validGoPkg's versions list for entries carrying
+// the given version strings.
+func pkgWithVersions(versions ...string) string {
+	base := strings.SplitN(validGoPkg, "versions:\n", 2)[0]
+	var b strings.Builder
+	b.WriteString(base + "versions:\n")
+	for _, v := range versions {
+		b.WriteString("  - version: " + v + "\n    sha256:\n")
+		for _, p := range []string{"darwin/arm64", "darwin/amd64", "linux/arm64", "linux/amd64"} {
+			b.WriteString("      " + p + ": \"aaa\"\n")
+		}
+	}
+	return b.String()
+}
+
 var pkgBadArtifactTemplate = strings.Replace(validGoPkg,
 	`url: "https://go.dev/dl/go{{.Version}}.{{.OS}}-{{.Arch}}.tar.gz"`,
 	`url: "https://go.dev/dl/go{{.Version}}.{{.Bogus}}.tar.gz"`, 1)
@@ -96,6 +111,31 @@ func TestLintFindings(t *testing.T) {
 			}
 			if !anyContains(found, tc.wantSub) {
 				t.Fatalf("want a finding containing %q, got %v", tc.wantSub, found)
+			}
+		})
+	}
+}
+
+func TestLintVersionsNewestFirst(t *testing.T) {
+	cases := []struct {
+		name     string
+		versions []string
+		want     bool // want a newest-first finding
+	}{
+		{"ordered", []string{"v1.26.5", "v1.26.4"}, false},
+		{"out-of-order", []string{"v1.26.4", "v1.26.5"}, true},
+		{"mixed-scheme-ordered", []string{"1.27.0", "v1.26.5"}, false},
+		{"spelling-equal-adjacent", []string{"v1.26.5", "1.26.5"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeCatalog(t, map[string]string{"go": pkgWithVersions(tc.versions...)})
+			found, err := Lint(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := anyContains(found, "newest-first"); got != tc.want {
+				t.Fatalf("newest-first finding = %v, want %v (findings: %v)", got, tc.want, found)
 			}
 		})
 	}

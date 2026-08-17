@@ -46,7 +46,7 @@ func newCatalogBuildCmd() *cobra.Command {
 				console.Success("Pushed %s:%s", res.PushedRef, res.Version)
 			}
 			if push != "" && !dryRun && !hasVersionEntry(pkg, res.Version) {
-				console.Hint("record this version in " + args[0] + ":\n  - version: " + res.Version)
+				console.Hint("Record this version in " + args[0] + ":\n  - version: " + res.Version)
 			}
 			return nil
 		},

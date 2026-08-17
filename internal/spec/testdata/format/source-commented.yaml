@@ -1,0 +1,36 @@
+schema: 2
+
+name: openssl
+description: Cryptography and TLS toolkit
+homepage: https://www.openssl.org
+license: Apache-2.0
+
+platforms: [darwin/arm64, linux/arm64, linux/amd64]
+
+bins: [bin]
+libs: [lib]
+
+artifact:
+  oci: ":{{.Version}}"
+
+install:
+  - extract: {strip: 0}
+
+versions:
+  - version: v3.4.1
+    sourceSha256: "002a2d6b30b58bf4bea46c43bdd96365aaf8daa6c428782aa4feee06da197df3"
+
+build:
+  source:
+    url: 'https://github.com/openssl/openssl/releases/download/openssl-{{trimPrefix .Version "v"}}/openssl-{{trimPrefix .Version "v"}}.tar.gz'
+  output: out
+  steps:
+    - run: ./Configure --prefix=/ shared no-docs && make install_sw DESTDIR="$NEM_OUTPUT"
+    # macOS bakes absolute install names; rewrite to @rpath and re-sign.
+    - run: |
+        case "$NEM_OS" in
+        darwin)
+          # keep both libs consistent
+          codesign -f -s - lib/libcrypto.3.dylib lib/libssl.3.dylib
+          ;;
+        esac

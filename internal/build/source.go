@@ -6,8 +6,6 @@ import (
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -33,50 +31,11 @@ func fetchSource(ctx context.Context, client *http.Client, url, wantSHA256, dir 
 		}
 		return path, wantSHA256, true, nil
 	}
-	path, sum, err := downloadUnverified(ctx, client, url, dir, meta)
+	path, sum, err := fetch.DownloadUnverified(ctx, client, url, dir, meta, nil)
 	if err != nil {
 		return "", "", false, err
 	}
 	return path, sum, false, nil
-}
-
-// downloadUnverified streams url's body into a fresh temp file in dir,
-// hashing as it goes, without comparing against any expected digest. The
-// temp file is removed on any error.
-func downloadUnverified(ctx context.Context, client *http.Client, url, dir string, meta fetch.Meta) (string, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return "", "", fmt.Errorf("build request for %s: %w", url, err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
-	}
-
-	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*.tmp")
-	if err != nil {
-		return "", "", fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmpPath := f.Name()
-
-	sum := sha256.New()
-	_, copyErr := io.Copy(io.MultiWriter(f, sum), resp.Body)
-	closeErr := f.Close()
-	if copyErr != nil {
-		os.Remove(tmpPath)
-		return "", "", fmt.Errorf("download %s: %w", url, copyErr)
-	}
-	if closeErr != nil {
-		os.Remove(tmpPath)
-		return "", "", fmt.Errorf("close temp file %s: %w", tmpPath, closeErr)
-	}
-
-	return tmpPath, hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // unpackSource extracts archivePath, a gzip- or bzip2-compressed tar, into

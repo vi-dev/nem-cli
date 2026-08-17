@@ -68,7 +68,7 @@ func runSearch(cmd *cobra.Command, query string) error {
 	})
 
 	if len(hits) == 0 {
-		console.Warn("no packages match %q", query)
+		console.Warn("No packages match %q", query)
 		return nil
 	}
 
