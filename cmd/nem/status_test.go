@@ -143,6 +143,114 @@ func TestStatusGlobalScopeWorksOutsideProject(t *testing.T) {
 	}
 }
 
+func TestStatusShowsComposedEnvWithSource(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),
+		[]byte("[tools]\ntool = \"1.0.0\"\n\n[env]\nFROM_MANIFEST = \"x\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.lock"), []byte(
+		"# machine-written by nem — do not edit\nversion = 1\n\n"+
+			"[[package]]\nname = \"tool\"\nversion = \"1.0.0\"\ncatalog = \"c\"\ndirect = true\non_path = true\nplatforms = [\""+platformString()+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolDir := filepath.Join(nemHomeDir, "packages", "tool", "1.0.0")
+	writeMetaFile(t, toolDir, "package: tool\nversion: 1.0.0\ncatalog: c\nbins: [bin]\n"+
+		"env:\n  - name: TOOL_HOME\n    value: \"{{ .InstallDir }}\"\n")
+	chdir(t, t.TempDir()) // a directory with no nem.toml
+
+	out, errb, err := runNem(t, nemHomeDir, "status", "-g")
+	if err != nil {
+		t.Fatalf("status -g: %v\nstderr: %s", err, errb)
+	}
+	rows := map[string]string{} // variable → rest of row
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if f := strings.Fields(l); len(f) > 1 {
+			rows[f[0]] = strings.Join(f[1:], " ")
+		}
+	}
+	if !strings.Contains(out, "SOURCE") {
+		t.Errorf("stdout missing SOURCE header:\n%s", out)
+	}
+	if want := toolDir + " tool"; rows["TOOL_HOME"] != want {
+		t.Errorf("TOOL_HOME row = %q, want %q", rows["TOOL_HOME"], want)
+	}
+	if want := "x nem.toml"; rows["FROM_MANIFEST"] != want {
+		t.Errorf("FROM_MANIFEST row = %q, want %q", rows["FROM_MANIFEST"], want)
+	}
+	if !strings.Contains(out, "\n\nVARIABLE") {
+		t.Errorf("no blank line between packages and env tables:\n%s", out)
+	}
+}
+
+func TestStatusProjectScopeShowsComposedEnvWithSource(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),
+		[]byte("[env]\nGFOO = \"/g\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projDir, "nem.toml"),
+		[]byte("[tools]\ntool = \"1.0.0\"\n\n[env]\nBAR = \"$GFOO/bin\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projDir, "nem.lock"), []byte(
+		"# machine-written by nem — do not edit\nversion = 1\n\n"+
+			"[[package]]\nname = \"tool\"\nversion = \"1.0.0\"\ncatalog = \"c\"\ndirect = true\non_path = true\nplatforms = [\""+platformString()+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolDir := filepath.Join(nemHomeDir, "packages", "tool", "1.0.0")
+	writeMetaFile(t, toolDir, "package: tool\nversion: 1.0.0\ncatalog: c\nbins: [bin]\n"+
+		"env:\n  - name: TOOL_HOME\n    value: \"{{ .InstallDir }}\"\n")
+	chdir(t, projDir)
+
+	// The shell state after activation: GFOO live in-shell with its
+	// pre-nem original saved. BAR's value must expand from the original.
+	t.Setenv("GFOO", "/live")
+	t.Setenv("NEM_SAVED__GFOO_SET", "1")
+	t.Setenv("NEM_SAVED__GFOO", "/original")
+
+	out, errb, err := runNem(t, nemHomeDir, "status")
+	if err != nil {
+		t.Fatalf("status: %v\nstderr: %s", err, errb)
+	}
+	rows := map[string]string{}
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if f := strings.Fields(l); len(f) > 1 {
+			rows[f[0]] = strings.Join(f[1:], " ")
+		}
+	}
+	if want := toolDir + " tool"; rows["TOOL_HOME"] != want {
+		t.Errorf("TOOL_HOME row = %q, want %q", rows["TOOL_HOME"], want)
+	}
+	if want := "/original/bin nem.toml"; rows["BAR"] != want {
+		t.Errorf("BAR row = %q, want %q", rows["BAR"], want)
+	}
+	if _, ok := rows["GFOO"]; ok {
+		t.Errorf("global GFOO shown in project-scope status:\n%s", out)
+	}
+}
+
+func TestStatusWarnsOnReservedEnvVar(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "nem.toml"),
+		[]byte("[env]\nPATH = \"/custom\"\nOK_VAR = \"1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+
+	out, errb, err := runNem(t, filepath.Join(dir, "nemhome"), "status")
+	if err != nil {
+		t.Fatalf("status: %v\nstderr: %s", err, errb)
+	}
+	if !strings.Contains(errb, `reserved env var "PATH" skipped`) {
+		t.Errorf("stderr missing reserved-name warning:\n%s", errb)
+	}
+	if strings.Contains(out, "/custom") {
+		t.Errorf("reserved PATH entry rendered in table:\n%s", out)
+	}
+}
+
 func TestStatusScopesDoNotMerge(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),

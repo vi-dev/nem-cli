@@ -82,6 +82,14 @@ func loadProjectLayer() (*project.Manifest, *project.Lockfile, error) {
 	return manifest, lock, nil
 }
 
+func installMetaLookup(name, version string) (*install.Meta, bool) {
+	meta, err := install.ReadMeta(nemHome, name, version)
+	if err != nil {
+		return nil, false
+	}
+	return meta, true
+}
+
 func runEnv(cmd *cobra.Command, shellName string) error {
 	if shellName == "" {
 		shellName = defaultShellName()
@@ -104,14 +112,7 @@ func runEnv(cmd *cobra.Command, shellName string) error {
 		return err
 	}
 
-	metaLookup := func(name, version string) (*install.Meta, bool) {
-		meta, err := install.ReadMeta(nemHome, name, version)
-		if err != nil {
-			return nil, false
-		}
-		return meta, true
-	}
-	result := envx.Compose(projManifest, globalManifest, projLock, globalLock, nemHome, metaLookup, os.LookupEnv)
+	result := envx.Compose(projManifest, globalManifest, projLock, globalLock, nemHome, installMetaLookup, os.LookupEnv)
 	for _, w := range result.Warnings {
 		console.Warn("%s", w)
 	}

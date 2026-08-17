@@ -1,10 +1,12 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/vi-dev/nem-cli/internal/envx"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
 )
@@ -13,7 +15,7 @@ func newStatusCmd() *cobra.Command {
 	var global bool
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "Show declared tools and environment variables",
+		Short: "Show declared tools and composed environment variables",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(global)
@@ -70,12 +72,36 @@ func runStatus(global bool) error {
 	}
 	console.Table([]string{"package", "version", "catalog", "locked", "installed"}, rows)
 
-	if len(m.Env) > 0 {
-		envRows := [][]string{}
-		for _, e := range m.Env {
-			envRows = append(envRows, []string{e.Name, e.Value})
+	// The other scope's layer is loaded only so [env] references to its
+	// variables resolve to their saved pre-nem originals.
+	var other *project.Manifest
+	var otherLock *project.Lockfile
+	if global {
+		other, otherLock, err = loadProjectLayer()
+		if err != nil {
+			return err
 		}
-		console.Table([]string{"variable", "value"}, envRows)
+	} else {
+		other, err = project.LoadManifest(nemHome.GlobalManifest())
+		if err != nil {
+			return err
+		}
+		otherLock, err = project.LoadLock(nemHome.GlobalLock())
+		if err != nil {
+			return err
+		}
+	}
+	result := envx.ComposeScope(m, other, lock, otherLock, nemHome, installMetaLookup, os.LookupEnv)
+	for _, w := range result.Warnings {
+		console.Warn("%s", w)
+	}
+	if len(result.Vars) > 0 {
+		console.Blank()
+		envRows := [][]string{}
+		for _, v := range result.Vars {
+			envRows = append(envRows, []string{v.Name, v.Value, v.Source})
+		}
+		console.Table([]string{"variable", "value", "source"}, envRows)
 	}
 	return nil
 }

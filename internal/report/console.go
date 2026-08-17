@@ -159,6 +159,10 @@ func (c *Console) Hint(msg string) {
 	}
 }
 
+func (c *Console) Blank() {
+	fmt.Fprintln(c.out)
+}
+
 func (c *Console) Table(headers []string, rows [][]string) {
 	// Find max column count across headers and all rows
 	maxCols := len(headers)

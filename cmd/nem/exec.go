@@ -14,7 +14,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/envx"
-	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
 )
 
@@ -63,14 +62,7 @@ func composedPath() (envx.Result, string, error) {
 		return envx.Result{}, "", err
 	}
 
-	metaLookup := func(name, version string) (*install.Meta, bool) {
-		meta, err := install.ReadMeta(nemHome, name, version)
-		if err != nil {
-			return nil, false
-		}
-		return meta, true
-	}
-	result := envx.Compose(projManifest, globalManifest, projLock, globalLock, nemHome, metaLookup, os.LookupEnv)
+	result := envx.Compose(projManifest, globalManifest, projLock, globalLock, nemHome, installMetaLookup, os.LookupEnv)
 	for _, w := range result.Warnings {
 		console.Warn("%s", w)
 	}

@@ -465,3 +465,100 @@ func anyContains(list []string, substr string) bool {
 	}
 	return false
 }
+
+func TestComposeVarSources(t *testing.T) {
+	h := testHome()
+
+	global := &project.Manifest{Env: []project.EnvVar{
+		{Name: "FROM_MANIFEST", Value: "1"},
+		{Name: "SHARED", Value: "manifest-wins"},
+	}}
+	globalLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgg", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	metaLookup := mapMetaLookup(map[string]*install.Meta{
+		metaKey("pkgg", "1.0.0"): {Env: []spec.EnvExport{
+			{Name: "FROM_PKG", Value: "2"},
+			{Name: "SHARED", Value: "pkg"},
+		}},
+	})
+
+	result := Compose(&project.Manifest{}, global, &project.Lockfile{}, globalLock, h, metaLookup, mapGetenv(nil))
+
+	sources := map[string]string{}
+	for _, v := range result.Vars {
+		sources[v.Name] = v.Source
+	}
+	if sources["FROM_PKG"] != "pkgg" {
+		t.Errorf("FROM_PKG source = %q, want pkgg", sources["FROM_PKG"])
+	}
+	if sources["FROM_MANIFEST"] != "nem.toml" {
+		t.Errorf("FROM_MANIFEST source = %q, want nem.toml", sources["FROM_MANIFEST"])
+	}
+	if sources["SHARED"] != "nem.toml" {
+		t.Errorf("SHARED source = %q, want nem.toml (last writer wins)", sources["SHARED"])
+	}
+}
+
+func TestComposeScopeShowsOnlyScopeContributions(t *testing.T) {
+	h := testHome()
+
+	scope := &project.Manifest{Env: []project.EnvVar{{Name: "SCOPE_ENV", Value: "s"}}}
+	other := &project.Manifest{Env: []project.EnvVar{{Name: "OTHER_ENV", Value: "o"}}}
+	scopeLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgs", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	otherLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgo", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	metaLookup := mapMetaLookup(map[string]*install.Meta{
+		metaKey("pkgs", "1.0.0"): {Env: []spec.EnvExport{{Name: "SCOPE_PKG", Value: "sp"}}},
+		metaKey("pkgo", "1.0.0"): {Env: []spec.EnvExport{{Name: "OTHER_PKG", Value: "op"}}},
+	})
+
+	result := ComposeScope(scope, other, scopeLock, otherLock, h, metaLookup, mapGetenv(nil))
+
+	got := map[string]string{}
+	for _, v := range result.Vars {
+		got[v.Name] = v.Source
+	}
+	if got["SCOPE_ENV"] != "nem.toml" {
+		t.Errorf("SCOPE_ENV source = %q, want nem.toml", got["SCOPE_ENV"])
+	}
+	if got["SCOPE_PKG"] != "pkgs" {
+		t.Errorf("SCOPE_PKG source = %q, want pkgs", got["SCOPE_PKG"])
+	}
+	for _, name := range []string{"OTHER_ENV", "OTHER_PKG"} {
+		if _, ok := got[name]; ok {
+			t.Errorf("%s present in scoped result, want only scope-layer vars", name)
+		}
+	}
+}
+
+func TestComposeScopeResolvesOtherScopeManagedReferences(t *testing.T) {
+	h := testHome()
+
+	scope := &project.Manifest{Env: []project.EnvVar{{Name: "BAR", Value: "$FOO/bin"}}}
+	other := &project.Manifest{}
+	otherLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgo", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	metaLookup := mapMetaLookup(map[string]*install.Meta{
+		metaKey("pkgo", "1.0.0"): {Env: []spec.EnvExport{{Name: "FOO", Value: "/nem/value"}}},
+	})
+	getenv := mapGetenv(map[string]string{
+		"FOO":                "/nem/value",
+		"NEM_SAVED__FOO_SET": "1",
+		"NEM_SAVED__FOO":     "/original",
+	})
+
+	result := ComposeScope(scope, other, &project.Lockfile{}, otherLock, h, metaLookup, getenv)
+
+	got := map[string]string{}
+	for _, v := range result.Vars {
+		got[v.Name] = v.Value
+	}
+	if got["BAR"] != "/original/bin" {
+		t.Errorf("BAR = %q, want /original/bin (reference to other-scope-managed FOO must use the saved original)", got["BAR"])
+	}
+}

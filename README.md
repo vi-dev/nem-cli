@@ -94,7 +94,7 @@ Every command supports `--help`. The main ones:
 |---|---|
 | `nem use [<catalog>:]<pkg>[@<version>]...` | Declare and install tools |
 | `nem sync` | Install locked tools missing on this machine |
-| `nem status` | Show declared tools and environment variables |
+| `nem status` | Show declared tools and composed environment variables |
 | `nem search <query>` | Search catalogs for packages |
 | `nem which <tool>...` | Show where a tool resolves in the composed environment |
 | `nem env` / `nem exec` | Print or run a command in the composed environment |

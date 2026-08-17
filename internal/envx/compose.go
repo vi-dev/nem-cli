@@ -13,8 +13,10 @@ import (
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
-// Var is one composed environment variable.
-type Var struct{ Name, Value string }
+// Var is one composed environment variable. Source names where the final
+// value came from: the exporting package's name, or "nem.toml" for a
+// manifest [env] entry.
+type Var struct{ Name, Value, Source string }
 
 // Result is the outcome of composing a directory's environment.
 type Result struct {
@@ -46,12 +48,13 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 	loaderPath := buildLoaderPath(resolvedProject, resolvedGlobal)
 
 	vars := map[string]string{}
-	applyPackageExports(resolvedGlobal, vars, &warnings)
-	applyPackageExports(resolvedProject, vars, &warnings)
+	sources := map[string]string{}
+	applyPackageExports(resolvedGlobal, vars, sources, &warnings)
+	applyPackageExports(resolvedProject, vars, sources, &warnings)
 
 	lookup := savedOriginalLookup(managedKeys(vars, global.Env, project.Env), getenv)
-	applyEnvSection(global.Env, vars, &warnings, lookup)
-	applyEnvSection(project.Env, vars, &warnings, lookup)
+	applyEnvSection(global.Env, vars, sources, &warnings, lookup)
+	applyEnvSection(project.Env, vars, sources, &warnings, lookup)
 
 	names := make([]string, 0, len(vars))
 	for name := range vars {
@@ -61,7 +64,55 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 
 	result := Result{Path: path, LoaderVar: loaderPathVar(), LoaderPath: loaderPath, Warnings: warnings}
 	for _, name := range names {
-		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name]})
+		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name], Source: sources[name]})
+	}
+	return result
+}
+
+// ComposeScope is Compose restricted to one layer: only scope's [env]
+// entries and scope's locked packages' exports appear in the result, but
+// [env] references still resolve as in the full composition — a variable
+// managed by either layer expands to its saved pre-nem original, not
+// nem's own live value. Only scope-layer warnings are reported.
+func ComposeScope(scope, other *project.Manifest, scopeLock, otherLock *project.Lockfile, h home.Home,
+	metaLookup func(name, version string) (*install.Meta, bool),
+	getenv func(string) (string, bool)) Result {
+
+	var warnings []string
+
+	resolvedScope, w := resolveEntries(orderedLockEntries(scopeLock), metaLookup, h)
+	warnings = append(warnings, w...)
+	resolvedOther, _ := resolveEntries(orderedLockEntries(otherLock), metaLookup, h)
+
+	vars := map[string]string{}
+	sources := map[string]string{}
+	applyPackageExports(resolvedScope, vars, sources, &warnings)
+
+	otherVars := map[string]string{}
+	var otherWarnings []string
+	applyPackageExports(resolvedOther, otherVars, map[string]string{}, &otherWarnings)
+
+	managed := managedKeys(vars, scope.Env, other.Env)
+	for name := range otherVars {
+		managed[name] = true
+	}
+	lookup := savedOriginalLookup(managed, getenv)
+	applyEnvSection(scope.Env, vars, sources, &warnings, lookup)
+
+	names := make([]string, 0, len(vars))
+	for name := range vars {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	result := Result{
+		Path:       buildPath(resolvedScope, nil),
+		LoaderVar:  loaderPathVar(),
+		LoaderPath: buildLoaderPath(resolvedScope, nil),
+		Warnings:   warnings,
+	}
+	for _, name := range names {
+		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name], Source: sources[name]})
 	}
 	return result
 }
@@ -191,8 +242,9 @@ func loaderPathVar() string {
 }
 
 // applyPackageExports renders each entry's raw env templates against its
-// install dir and version, writing results into vars (last writer wins).
-func applyPackageExports(entries []resolvedEntry, vars map[string]string, warnings *[]string) {
+// install dir and version, writing results into vars (last writer wins)
+// and recording the exporting package's name in sources.
+func applyPackageExports(entries []resolvedEntry, vars, sources map[string]string, warnings *[]string) {
 	current := spec.Current()
 	for _, r := range entries {
 		for _, export := range r.meta.Env {
@@ -209,6 +261,7 @@ func applyPackageExports(entries []resolvedEntry, vars map[string]string, warnin
 				continue
 			}
 			vars[export.Name] = value
+			sources[export.Name] = r.name
 		}
 	}
 }
@@ -289,14 +342,15 @@ func savedOriginalLookup(managed map[string]bool, getenv func(string) (string, b
 }
 
 // applyEnvSection expands a manifest's [env] entries via lookup, writing
-// results into vars (last writer wins); a reserved name is skipped with a
-// warning.
-func applyEnvSection(entries []project.EnvVar, vars map[string]string, warnings *[]string, lookup func(string) (string, bool)) {
+// results into vars (last writer wins) with "nem.toml" recorded in
+// sources; a reserved name is skipped with a warning.
+func applyEnvSection(entries []project.EnvVar, vars, sources map[string]string, warnings *[]string, lookup func(string) (string, bool)) {
 	for _, e := range entries {
 		if IsReserved(e.Name) {
 			*warnings = append(*warnings, fmt.Sprintf("reserved env var %q skipped", e.Name))
 			continue
 		}
 		vars[e.Name] = Expand(e.Value, lookup)
+		sources[e.Name] = "nem.toml"
 	}
 }
