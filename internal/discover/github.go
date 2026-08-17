@@ -3,6 +3,7 @@ package discover
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,7 @@ func parseAdvertisement(r io.Reader) ([]string, error) {
 	hdr := make([]byte, 4)
 	for {
 		if _, err := io.ReadFull(br, hdr); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return tags, nil
 			}
 			return nil, fmt.Errorf("read pkt length: %w", err)

@@ -3,9 +3,10 @@
 package publish
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/vi-dev/nem-cli/internal/envx"
@@ -47,27 +48,20 @@ func Lint(dir string) ([]Finding, error) {
 		return findings, nil
 	}
 
-	pkgsDir := filepath.Join(dir, "pkgs")
-	entries, err := os.ReadDir(pkgsDir)
-	if os.IsNotExist(err) {
+	manifests, err := Manifests(dir)
+	if errors.Is(err, fs.ErrNotExist) {
 		return []Finding{{Msg: "no pkgs directory found"}}, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", pkgsDir, err)
+		return nil, err
+	}
+	if len(manifests) == 0 {
+		return []Finding{{Msg: "pkgs directory contains no packages"}}, nil
 	}
 
 	var findings []Finding
-	packages := 0
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		packages++
-		path := filepath.Join(pkgsDir, e.Name(), "pkg.yaml")
-		findings = append(findings, lintPackage(e.Name(), path, true)...)
-	}
-	if packages == 0 {
-		return []Finding{{Msg: "pkgs directory contains no packages"}}, nil
+	for _, m := range manifests {
+		findings = append(findings, lintPackage(m.Pkg, m.Path, true)...)
 	}
 
 	sortFindings(findings)

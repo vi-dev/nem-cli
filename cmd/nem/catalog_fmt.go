@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/vi-dev/nem-cli/internal/fsx"
+	"github.com/vi-dev/nem-cli/internal/publish"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
@@ -45,7 +45,7 @@ func newCatalogFmtCmd() *cobra.Command {
 					fmt.Fprintln(cmd.OutOrStdout(), p)
 					continue
 				}
-				if err := writeManifest(p, formatted); err != nil {
+				if err := fsx.WriteAtomic(p, formatted, 0o644); err != nil {
 					return err
 				}
 				console.Success("Formatted %s", p)
@@ -61,7 +61,8 @@ func newCatalogFmtCmd() *cobra.Command {
 }
 
 // manifestPaths resolves target — a catalog dir laid out as
-// pkgs/<name>/pkg.yaml, or a single manifest file — to manifest paths.
+// pkgs/<name>/pkg.yaml, or a single manifest file — to the manifest
+// paths that exist.
 func manifestPaths(target string) ([]string, error) {
 	info, err := os.Stat(target)
 	if err != nil {
@@ -70,49 +71,18 @@ func manifestPaths(target string) ([]string, error) {
 	if !info.IsDir() {
 		return []string{target}, nil
 	}
-	pkgsDir := filepath.Join(target, "pkgs")
-	entries, err := os.ReadDir(pkgsDir)
+	manifests, err := publish.Manifests(target)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", pkgsDir, err)
+		return nil, err
 	}
 	var out []string
-	for _, de := range entries {
-		if !de.IsDir() {
-			continue
-		}
-		p := filepath.Join(pkgsDir, de.Name(), "pkg.yaml")
-		if _, err := os.Stat(p); err == nil {
-			out = append(out, p)
+	for _, m := range manifests {
+		if _, err := os.Stat(m.Path); err == nil {
+			out = append(out, m.Path)
 		}
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("no package manifests under %s", target)
 	}
 	return out, nil
-}
-
-// writeManifest replaces path's content atomically: write a temp file in
-// the same directory, then rename over the original.
-func writeManifest(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, ".pkg-*.yaml")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	_, werr := tmp.Write(data)
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := os.Chmod(tmpPath, 0o644); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
-		return err
-	}
-	return nil
 }

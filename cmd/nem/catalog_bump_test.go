@@ -344,6 +344,29 @@ func TestCatalogBumpBackfillSourceBuiltWarns(t *testing.T) {
 	}
 }
 
+func TestCatalogBumpDeadSourceURLNamesItWithoutRetryHint(t *testing.T) {
+	nemHome := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(http.NotFound))
+	t.Cleanup(srv.Close)
+	dir := writeLintFixture(t, map[string]string{"openssl": sourceBackfillFixture(srv.URL)})
+	path := filepath.Join(dir, "pkgs", "openssl", "pkg.yaml")
+	before := mustRead(t, path)
+
+	_, errOut, err := runNem(t, nemHome, "catalog", "bump", "--version", "3.4.3", path)
+	if err == nil {
+		t.Fatal("want error for a dead source URL")
+	}
+	if !strings.Contains(errOut, srv.URL) {
+		t.Fatalf("stderr = %q, want the failing source URL named", errOut)
+	}
+	if strings.Contains(errOut, "retry later") {
+		t.Fatalf("stderr = %q, must not suggest retrying a dead source URL", errOut)
+	}
+	if string(mustRead(t, path)) != string(before) {
+		t.Fatal("failed bump must not modify the manifest")
+	}
+}
+
 func TestCatalogBumpVersionAndBackfillConflict(t *testing.T) {
 	nemHome := t.TempDir()
 	srv, _ := bumpMultiArtifactServer(t)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -167,18 +166,14 @@ func enumerate(dir string) ([]pkgEntry, error) {
 		return []pkgEntry{e}, nil
 	}
 
-	pkgsDir := filepath.Join(dir, "pkgs")
-	dirEntries, err := os.ReadDir(pkgsDir)
+	manifests, err := Manifests(dir)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", pkgsDir, err)
+		return nil, err
 	}
 
 	var out []pkgEntry
-	for _, de := range dirEntries {
-		if !de.IsDir() {
-			continue
-		}
-		e, err := readEntry(filepath.Join(pkgsDir, de.Name(), "pkg.yaml"))
+	for _, m := range manifests {
+		e, err := readEntry(m.Path)
 		if err != nil {
 			return nil, err
 		}

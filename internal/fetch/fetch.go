@@ -38,57 +38,15 @@ const progressChunk = 256 * 1024
 // Progress is fed (done, total) as the body downloads, total being -1 when
 // the response carries no Content-Length.
 func Download(ctx context.Context, client *http.Client, url, wantSHA256, dir string, meta Meta, task report.Task) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	path, got, err := DownloadUnverified(ctx, client, url, dir, meta, task)
 	if err != nil {
-		return "", fmt.Errorf("build request for %s: %w", url, err)
+		return "", err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch %s: %w", url, err)
-	}
-	defer resp.Body.Close()
-
-	platform := meta.Platform.String()
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound, http.StatusGone:
-		return "", &ArtifactNotFoundError{Name: meta.Name, Version: meta.Version, Platform: platform, Missing: "url"}
-	default:
-		return "", fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
-	}
-
-	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("create temp file in %s: %w", dir, err)
-	}
-	tmpPath := f.Name()
-
-	sum := sha256.New()
-	dst := io.MultiWriter(f, sum)
-	if task != nil {
-		dst = io.MultiWriter(f, sum, newProgressWriter(task, resp.ContentLength))
-	}
-
-	written, copyErr := io.Copy(dst, resp.Body)
-	closeErr := f.Close()
-	if task != nil {
-		task.Progress(written, resp.ContentLength)
-	}
-	if copyErr != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("download %s: %w", url, copyErr)
-	}
-	if closeErr != nil {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("close temp file %s: %w", tmpPath, closeErr)
-	}
-
-	got := hex.EncodeToString(sum.Sum(nil))
 	if got != wantSHA256 {
-		os.Remove(tmpPath)
-		return "", &ChecksumMismatchError{Name: meta.Name, Version: meta.Version, Platform: platform, Got: got, Want: wantSHA256}
+		os.Remove(path)
+		return "", &ChecksumMismatchError{Name: meta.Name, Version: meta.Version, Platform: meta.Platform.String(), Got: got, Want: wantSHA256}
 	}
-	return tmpPath, nil
+	return path, nil
 }
 
 // DownloadUnverified streams url's body into a fresh temp file in dir,
@@ -96,23 +54,11 @@ func Download(ctx context.Context, client *http.Client, url, wantSHA256, dir str
 // returns the temp file's path and the computed hex digest, for callers
 // that pin checksums rather than verify them.
 func DownloadUnverified(ctx context.Context, client *http.Client, url, dir string, meta Meta, task report.Task) (string, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := get(ctx, client, url, meta)
 	if err != nil {
-		return "", "", fmt.Errorf("build request for %s: %w", url, err)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", "", fmt.Errorf("fetch %s: %w", url, err)
+		return "", "", err
 	}
 	defer resp.Body.Close()
-
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound, http.StatusGone:
-		return "", "", &ArtifactNotFoundError{Name: meta.Name, Version: meta.Version, Platform: meta.Platform.String(), Missing: "url"}
-	default:
-		return "", "", fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
-	}
 
 	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*.tmp")
 	if err != nil {
@@ -120,16 +66,8 @@ func DownloadUnverified(ctx context.Context, client *http.Client, url, dir strin
 	}
 	tmpPath := f.Name()
 
-	sum := sha256.New()
-	dst := io.MultiWriter(f, sum)
-	if task != nil {
-		dst = io.MultiWriter(f, sum, newProgressWriter(task, resp.ContentLength))
-	}
-	written, copyErr := io.Copy(dst, resp.Body)
+	sum, copyErr := digest(resp, f, task)
 	closeErr := f.Close()
-	if task != nil {
-		task.Progress(written, resp.ContentLength)
-	}
 	if copyErr != nil {
 		os.Remove(tmpPath)
 		return "", "", fmt.Errorf("download %s: %w", url, copyErr)
@@ -138,7 +76,65 @@ func DownloadUnverified(ctx context.Context, client *http.Client, url, dir strin
 		os.Remove(tmpPath)
 		return "", "", fmt.Errorf("close temp file %s: %w", tmpPath, closeErr)
 	}
-	return tmpPath, hex.EncodeToString(sum.Sum(nil)), nil
+	return tmpPath, sum, nil
+}
+
+// DigestURL streams url's body through sha256 without persisting it,
+// returning the hex digest — for callers that only need to pin a
+// checksum, not keep the bytes.
+func DigestURL(ctx context.Context, client *http.Client, url string, meta Meta, task report.Task) (string, error) {
+	resp, err := get(ctx, client, url, meta)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	sum, err := digest(resp, io.Discard, task)
+	if err != nil {
+		return "", fmt.Errorf("download %s: %w", url, err)
+	}
+	return sum, nil
+}
+
+// get issues the artifact GET, mapping 404/410 to ArtifactNotFoundError
+// and any other non-200 status to an error. The caller owns resp.Body.
+func get(ctx context.Context, client *http.Client, url string, meta Meta) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request for %s: %w", url, err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch %s: %w", url, err)
+	}
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return resp, nil
+	case http.StatusNotFound, http.StatusGone:
+		resp.Body.Close()
+		return nil, &ArtifactNotFoundError{Name: meta.Name, Version: meta.Version, Platform: meta.Platform.String(), Missing: "url", URL: url}
+	default:
+		resp.Body.Close()
+		return nil, fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
+	}
+}
+
+// digest copies resp's body to w while hashing it, feeding task progress
+// when task is non-nil, and returns the hex digest.
+func digest(resp *http.Response, w io.Writer, task report.Task) (string, error) {
+	sum := sha256.New()
+	dst := io.MultiWriter(w, sum)
+	if task != nil {
+		dst = io.MultiWriter(w, sum, newProgressWriter(task, resp.ContentLength))
+	}
+	written, err := io.Copy(dst, resp.Body)
+	if task != nil {
+		task.Progress(written, resp.ContentLength)
+	}
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // progressWriter reports download progress to a report.Task every

@@ -39,11 +39,11 @@ func InsertVersionAt(data []byte, e VersionEntry, pos int) ([]byte, error) {
 	}
 	p, err := yaml.PathString("$.versions")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("versions path: %w", err)
 	}
 	sNode, err := p.FilterFile(sf)
 	if err != nil {
-		return nil, fmt.Errorf("render new entry: %w", err)
+		return nil, fmt.Errorf("locate rendered entry: %w", err)
 	}
 	newSeq, ok := sNode.(*ast.SequenceNode)
 	if !ok || len(newSeq.Values) != 1 {
@@ -79,7 +79,7 @@ func ValidateEditable(data []byte) error {
 func locateVersions(f *ast.File) (*ast.SequenceNode, error) {
 	p, err := yaml.PathString("$.versions")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("versions path: %w", err)
 	}
 	node, err := p.FilterFile(f)
 	if err != nil {

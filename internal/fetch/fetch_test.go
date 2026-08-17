@@ -397,6 +397,41 @@ func TestDownloadUnverifiedComputesSum(t *testing.T) {
 	}
 }
 
+func TestDigestURLComputesSumWithoutFiles(t *testing.T) {
+	body := []byte("catalog artifact bytes")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(body)
+	}))
+	defer srv.Close()
+
+	meta := fetch.Meta{Name: "jq", Version: "1.8.3", Platform: spec.Platform{OS: "linux", Arch: "amd64"}}
+	sum, err := fetch.DigestURL(context.Background(), srv.Client(), srv.URL, meta, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := sha256.Sum256(body)
+	if sum != hex.EncodeToString(want[:]) {
+		t.Fatalf("sum = %s, want %x", sum, want)
+	}
+}
+
+func TestDigestURLNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	meta := fetch.Meta{Name: "jq", Version: "9.9.9", Platform: spec.Platform{OS: "linux", Arch: "amd64"}}
+	_, err := fetch.DigestURL(context.Background(), srv.Client(), srv.URL, meta, nil)
+	var nf *fetch.ArtifactNotFoundError
+	if !errors.As(err, &nf) {
+		t.Fatalf("err = %v, want ArtifactNotFoundError", err)
+	}
+	if !strings.Contains(err.Error(), srv.URL) {
+		t.Fatalf("err = %v, want the failing URL in the message", err)
+	}
+}
+
 func TestDownloadUnverifiedNotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
@@ -408,6 +443,9 @@ func TestDownloadUnverifiedNotFound(t *testing.T) {
 	var nf *fetch.ArtifactNotFoundError
 	if !errors.As(err, &nf) {
 		t.Fatalf("err = %v, want ArtifactNotFoundError", err)
+	}
+	if !strings.Contains(err.Error(), srv.URL) {
+		t.Fatalf("err = %v, want the failing URL in the message", err)
 	}
 }
 

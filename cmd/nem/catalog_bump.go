@@ -14,14 +14,15 @@ import (
 
 	"github.com/vi-dev/nem-cli/internal/discover"
 	"github.com/vi-dev/nem-cli/internal/fetch"
+	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
-// bumpList and bumpDownload are package vars so tests can stub
-// upstream listing and artifact downloads.
+// bumpList and bumpDigest are package vars so tests can stub upstream
+// listing and artifact hashing.
 var (
-	bumpList     = discover.List
-	bumpDownload = fetch.DownloadUnverified
+	bumpList   = discover.List
+	bumpDigest = fetch.DigestURL
 )
 
 func newCatalogBumpCmd() *cobra.Command {
@@ -129,7 +130,7 @@ func newCatalogBumpCmd() *cobra.Command {
 					return fmt.Errorf("edited manifest is not newest-first at %s", check.Versions[i].Version)
 				}
 			}
-			if err := writeManifest(path, edited); err != nil {
+			if err := fsx.WriteAtomic(path, edited, 0o644); err != nil {
 				return err
 			}
 
@@ -220,17 +221,12 @@ func insertPos(data []byte, version string) (int, error) {
 // artifact hashes for url/github artifacts, a pinned source hash for
 // source-built packages, a bare version for external oci artifacts.
 func buildEntry(ctx context.Context, pkg *spec.Package, target string) (spec.VersionEntry, error) {
-	e := spec.VersionEntry{Version: target}
 	if pkg.Artifact.OCI != "" {
 		return buildOCIEntry(ctx, pkg, target)
 	}
 
+	e := spec.VersionEntry{Version: target}
 	platforms := pkg.SupportedBy()
-	tmpDir, cleanup, err := bumpTmpDir()
-	if err != nil {
-		return e, err
-	}
-	defer cleanup()
 
 	sums := make([]string, len(platforms))
 	g, gctx := errgroup.WithContext(ctx)
@@ -243,7 +239,7 @@ func buildEntry(ctx context.Context, pkg *spec.Package, target string) (spec.Ver
 			subject := pkg.Name + " " + target + " " + plat.String()
 			task := console.Task("Hashing " + subject)
 			meta := fetch.Meta{Name: pkg.Name, Version: target, Platform: plat}
-			_, sum, err := bumpDownload(gctx, http.DefaultClient, url, tmpDir, meta, task)
+			sum, err := bumpDigest(gctx, http.DefaultClient, url, meta, task)
 			if err != nil {
 				task.Fail("Download failed for " + subject)
 				return err
@@ -275,32 +271,21 @@ func buildOCIEntry(ctx context.Context, pkg *spec.Package, target string) (spec.
 	if err != nil {
 		return e, err
 	}
-	tmpDir, cleanup, err := bumpTmpDir()
-	if err != nil {
-		return e, err
-	}
-	defer cleanup()
 	subject := pkg.Name + " " + target + " source"
 	task := console.Task("Hashing " + subject)
 	meta := fetch.Meta{Name: pkg.Name, Version: target, Platform: spec.Current()}
-	_, sum, err := bumpDownload(ctx, http.DefaultClient, url, tmpDir, meta, task)
+	sum, err := bumpDigest(ctx, http.DefaultClient, url, meta, task)
 	if err != nil {
 		task.Fail("Download failed for " + subject)
+		// A missing source tarball is a dead or wrong URL, not a
+		// release still uploading — surface the URL, not a retry hint.
+		var nf *fetch.ArtifactNotFoundError
+		if errors.As(err, &nf) {
+			return e, fmt.Errorf("source for %s@%s not found: %s", pkg.Name, target, url)
+		}
 		return e, err
 	}
 	task.Done("Hashed " + subject)
 	e.SourceSha256 = sum
 	return e, nil
-}
-
-// bumpTmpDir creates a scratch dir under $NEM_HOME/tmp for downloads.
-func bumpTmpDir() (string, func(), error) {
-	if err := os.MkdirAll(nemHome.Tmp(), 0o755); err != nil {
-		return "", nil, err
-	}
-	dir, err := os.MkdirTemp(nemHome.Tmp(), "bump-")
-	if err != nil {
-		return "", nil, err
-	}
-	return dir, func() { os.RemoveAll(dir) }, nil
 }
