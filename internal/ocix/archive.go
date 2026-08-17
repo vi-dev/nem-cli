@@ -49,20 +49,9 @@ func RemoteArchives(catalogRef, name string) (oras.ReadOnlyTarget, error) {
 // callers can errors.Is against it). Any other resolve/fetch error (auth,
 // network, digest mismatch) is wrapped and passed through unchanged.
 func PullArchiveFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, plat spec.Platform, dir string) (string, error) {
-	idxDesc, err := src.Resolve(ctx, srcRef)
+	idx, err := fetchArchiveIndex(ctx, src, srcRef)
 	if err != nil {
-		if archiveAbsent(err) {
-			return "", fmt.Errorf("resolve archive ref %s: %w", srcRef, ErrArchiveNotFound)
-		}
-		return "", fmt.Errorf("resolve archive ref %s: %w", srcRef, err)
-	}
-	idxData, err := content.FetchAll(ctx, src, idxDesc)
-	if err != nil {
-		return "", fmt.Errorf("read archive index: %w", err)
-	}
-	var idx ocispec.Index
-	if err := json.Unmarshal(idxData, &idx); err != nil {
-		return "", fmt.Errorf("parse archive index: %w", err)
+		return "", err
 	}
 
 	manifestDesc, ok := manifestForPlatform(idx, plat)
@@ -89,6 +78,46 @@ func PullArchiveFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef string
 	}
 
 	return writeTempArchive(dir, data)
+}
+
+// ArchivePlatforms resolves tag on src, expecting a multi-platform archive
+// index, and returns the platforms its manifests carry. A missing archives
+// repo or tag reports ErrArchiveNotFound (wrapped with context, so callers
+// can errors.Is against it).
+func ArchivePlatforms(ctx context.Context, src oras.ReadOnlyTarget, tag string) ([]spec.Platform, error) {
+	idx, err := fetchArchiveIndex(ctx, src, tag)
+	if err != nil {
+		return nil, err
+	}
+	var out []spec.Platform
+	for _, m := range idx.Manifests {
+		if m.Platform != nil {
+			out = append(out, spec.Platform{OS: m.Platform.OS, Arch: m.Platform.Architecture})
+		}
+	}
+	return out, nil
+}
+
+// fetchArchiveIndex resolves srcRef (a tag) on src and unmarshals the
+// multi-platform archive index it names. A missing archives repo or tag
+// reports ErrArchiveNotFound (wrapped with context).
+func fetchArchiveIndex(ctx context.Context, src oras.ReadOnlyTarget, srcRef string) (ocispec.Index, error) {
+	idxDesc, err := src.Resolve(ctx, srcRef)
+	if err != nil {
+		if archiveAbsent(err) {
+			return ocispec.Index{}, fmt.Errorf("resolve archive ref %s: %w", srcRef, ErrArchiveNotFound)
+		}
+		return ocispec.Index{}, fmt.Errorf("resolve archive ref %s: %w", srcRef, err)
+	}
+	idxData, err := content.FetchAll(ctx, src, idxDesc)
+	if err != nil {
+		return ocispec.Index{}, fmt.Errorf("read archive index: %w", err)
+	}
+	var idx ocispec.Index
+	if err := json.Unmarshal(idxData, &idx); err != nil {
+		return ocispec.Index{}, fmt.Errorf("parse archive index: %w", err)
+	}
+	return idx, nil
 }
 
 // archiveAbsent reports whether err from an archives-repo read means the
