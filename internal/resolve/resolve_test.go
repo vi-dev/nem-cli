@@ -651,3 +651,82 @@ versions:
 		t.Fatalf("want 2 entries (a, b), got %+v", res.Entries)
 	}
 }
+
+func TestResolvePinnedRootDepConflictErrors(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.0.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+    version: v2.0.0
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Name: "a"}, Version: "v1.0.0"},
+		{Key: project.ToolKey{Name: "b"}},
+	}
+	_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	var pce *resolve.PinConflictError
+	if !errors.As(err, &pce) {
+		t.Fatalf("want PinConflictError, got %v", err)
+	}
+	if pce.Name != "a" || pce.Pinned != "v1.0.0" || pce.Required != "v2.0.0" {
+		t.Fatalf("PinConflictError: %+v", pce)
+	}
+}
+
+func TestResolvePinnedRootDepAgreementResolves(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.0.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+    version: v2.0.0
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Name: "a"}, Version: "v2.0.0"},
+		{Key: project.ToolKey{Name: "b"}},
+	}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if a := entry(t, res, "a"); a.Version != "v2.0.0" || !a.Direct {
+		t.Fatalf("entry a: %+v", a)
+	}
+}

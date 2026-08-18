@@ -63,6 +63,21 @@ func LoadLock(path string) (*Lockfile, error) {
 	return lf, nil
 }
 
+// Covers reports whether a direct lock entry accounts for tool exactly:
+// same name and version, and — when tool names a catalog — the same
+// catalog (an unqualified tool matches any catalog, mirroring
+// resolution's search across all of them). Dependency-only entries never
+// cover a direct declaration, since unusing their parent would drop them.
+func (lf *Lockfile) Covers(tool ToolEntry) bool {
+	for _, e := range lf.Packages {
+		if e.Direct && e.Name == tool.Key.Name && e.Version == tool.Version &&
+			(tool.Key.Catalog == "" || tool.Key.Catalog == e.Catalog) {
+			return true
+		}
+	}
+	return false
+}
+
 // WriteLock writes the lockfile sorted and atomically; no-op when unchanged.
 func WriteLock(lf *Lockfile) error {
 	pkgs := append([]LockEntry(nil), lf.Packages...)

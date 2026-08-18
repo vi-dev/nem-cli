@@ -72,10 +72,10 @@ func TestHookBlockRunsHookOnceAtLoad(t *testing.T) {
 	}
 }
 
-func TestHookBlockWrapsNemAndReevaluatesOnUseUnuseSync(t *testing.T) {
+func TestHookBlockWrapsNemAndReevaluatesOnMutatingCommands(t *testing.T) {
 	for _, d := range []Dialect{Bash, Zsh} {
 		out := HookBlock(d)
-		for _, want := range []string{"nem() {", `command nem "$@"`, `case "$1" in`, "use|unuse|sync)"} {
+		for _, want := range []string{"nem() {", `command nem "$@"`, `case "$1" in`, "use|unuse|lock|sync)"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("expected %q in the nem() wrapper, got:\n%s", want, out)
 			}

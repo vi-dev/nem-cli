@@ -135,8 +135,20 @@ func writeManifestAndLock(manifest *project.Manifest, result *resolve.Result) er
 	if err := project.WriteManifest(manifest); err != nil {
 		return err
 	}
-	lockPath := filepath.Join(filepath.Dir(manifest.Path), "nem.lock")
-	lf := &project.Lockfile{Path: lockPath, Packages: result.Entries}
+	return writeLock(manifest, result)
+}
+
+// lockPathFor returns the lockfile path for a manifest: nem.lock sitting
+// in the same directory. Every reader and writer derives the pair this
+// way, so the two files can't drift apart by construction.
+func lockPathFor(manifestPath string) string {
+	return filepath.Join(filepath.Dir(manifestPath), "nem.lock")
+}
+
+// writeLock persists result's lock entries to the lockfile sitting next
+// to the manifest, leaving the manifest itself untouched.
+func writeLock(manifest *project.Manifest, result *resolve.Result) error {
+	lf := &project.Lockfile{Path: lockPathFor(manifest.Path), Packages: result.Entries}
 	return project.WriteLock(lf)
 }
 

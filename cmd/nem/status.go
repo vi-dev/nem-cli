@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -35,19 +34,13 @@ func runStatus(global bool) error {
 		return err
 	}
 
-	lockPath := nemHome.GlobalLock()
-	if !global {
-		lockPath = filepath.Join(filepath.Dir(manifestP), "nem.lock")
-	}
-	lock, err := project.LoadLock(lockPath)
+	lock, err := project.LoadLock(lockPathFor(manifestP))
 	if err != nil {
 		return err
 	}
 
-	locked := map[string]bool{}
 	lockedVersion := map[string]string{}
 	for _, e := range lock.Packages {
-		locked[e.Name+"@"+e.Version] = true
 		lockedVersion[e.Name] = e.Version
 	}
 
@@ -58,7 +51,7 @@ func runStatus(global bool) error {
 			catalog = "-"
 		}
 		lockedCell := "no"
-		if locked[tool.Key.Name+"@"+tool.Version] {
+		if lock.Covers(tool) {
 			lockedCell = "yes"
 		}
 		installedCell := "-"

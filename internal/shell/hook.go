@@ -18,7 +18,7 @@ nem() {
   command nem "$@"
   local __nem_rc=$?
   case "$1" in
-    use|unuse|sync)
+    use|unuse|lock|sync)
       eval "$(command nem env --shell %[1]s)"
       ;;
   esac
@@ -51,7 +51,7 @@ add-zsh-hook chpwd __nem_hook`
 // without clobbering whatever PROMPT_COMMAND already held), runs that
 // hook once immediately so the current directory activates without
 // waiting for the next cd, wraps `nem` in a function so a
-// `use`/`unuse`/`sync` subcommand also re-evaluates the environment,
+// `use`/`unuse`/`lock`/`sync` subcommand also re-evaluates the environment,
 // and sources shell completions on a best-effort basis — a failing
 // completion command must not break the rest of the block. The
 // returned string carries no markers; InstallBlock adds those when

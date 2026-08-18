@@ -41,6 +41,8 @@ var acquire = fetch.Acquire
 // <version>": Status "downloading" while its artifact is acquired (the
 // task is passed through so acquire can feed Progress), then "extracting"
 // while it's staged and committed, then Done "Installed <name> <version>".
+// A job that fails on its own error ends its task with "Failed <name>
+// <version>" and propagates the error for the caller to render once.
 // A job that never got to start, or that was interrupted mid-run, because
 // a sibling failed first reports "Cancelled <name> <version>" instead of
 // propagating the raw context error. Its downloaded artifact, if any, is
@@ -72,6 +74,9 @@ func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job, sem
 
 	label := fmt.Sprintf("Installing %s %s", name, version)
 	cancelled := fmt.Sprintf("Cancelled %s %s", name, version)
+	// The task outcome names the job, not the error: the error is returned
+	// and rendered once by the caller, so echoing it here printed it twice.
+	failedOutcome := fmt.Sprintf("Failed %s %s", name, version)
 
 	select {
 	case sem <- struct{}{}:
@@ -94,7 +99,7 @@ func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job, sem
 			task.Fail(cancelled)
 			return nil
 		}
-		task.Fail(err.Error())
+		task.Fail(failedOutcome)
 		return err
 	}
 	// Best-effort cleanup: the artifact is scratch space once install has
@@ -108,7 +113,7 @@ func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job, sem
 			task.Fail(cancelled)
 			return nil
 		}
-		task.Fail(err.Error())
+		task.Fail(failedOutcome)
 		return err
 	}
 

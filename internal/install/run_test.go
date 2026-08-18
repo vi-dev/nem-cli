@@ -294,7 +294,7 @@ func TestRunFailFastCancelsRestJobs(t *testing.T) {
 			t.Fatalf("%s: task not failed", name)
 		}
 		switch outcome {
-		case "boom":
+		case "Failed " + name + " v1.0.0":
 			sawBoom++
 		case "Cancelled " + name + " v1.0.0":
 			// expected for every sibling
@@ -381,8 +381,8 @@ func TestRunConcurrentRealErrorsAreNotMisclassifiedAsCancelled(t *testing.T) {
 	}
 
 	for _, tc := range []struct{ name, want string }{
-		{"joba", errA.Error()},
-		{"jobb", errB.Error()},
+		{"joba", "Failed joba v1.0.0"},
+		{"jobb", "Failed jobb v1.0.0"},
 	} {
 		task := rep.taskFor("Installing " + tc.name + " v1.0.0")
 		if task == nil {
@@ -393,7 +393,7 @@ func TestRunConcurrentRealErrorsAreNotMisclassifiedAsCancelled(t *testing.T) {
 			t.Fatalf("%s: done=%v failed=%v, want failed only", tc.name, done, failed)
 		}
 		if outcome != tc.want {
-			t.Fatalf("%s: outcome = %q, want its own real error %q (must not read Cancelled)", tc.name, outcome, tc.want)
+			t.Fatalf("%s: outcome = %q, want its own failure %q (must not read Cancelled)", tc.name, outcome, tc.want)
 		}
 	}
 }
@@ -485,10 +485,41 @@ func TestRunInstallFailureRemovesArtifact(t *testing.T) {
 	if done || !failed {
 		t.Fatalf("task done=%v failed=%v, want failed only", done, failed)
 	}
-	if !strings.Contains(outcome, "escapes staging dir") {
-		t.Fatalf("outcome = %q, want containment error text", outcome)
+	if outcome != "Failed badinstall v1.0.0" {
+		t.Fatalf("outcome = %q, want short failure outcome", outcome)
 	}
 	if IsInstalled(h, "badinstall", "v1.0.0") {
 		t.Fatal("must not be installed after a failed install action")
+	}
+}
+
+// TestRunFailedJobReportsShortOutcomeNotError pins the reporting contract
+// for a job that fails on its own error: the task line carries only the
+// short outcome, because the error itself is propagated and rendered once
+// by the caller — echoing it in the task too printed it twice.
+func TestRunFailedJobReportsShortOutcomeNotError(t *testing.T) {
+	h := runTestHome(t)
+	rep := &fakeReporter{}
+	jobs := []Job{{Pkg: copyToolPkg("tool"), Version: "v1.0.0", Catalog: "official"}}
+
+	bootErr := errors.New("version v1.0.0 not offered by tool")
+	withAcquire(t, func(context.Context, *spec.Package, string, spec.Platform, fetch.Source, string, report.Task) (string, error) {
+		return "", bootErr
+	})
+
+	err := Run(context.Background(), h, rep, jobs)
+	if !errors.Is(err, bootErr) {
+		t.Fatalf("Run error = %v, want %v", err, bootErr)
+	}
+	task := rep.taskFor("Installing tool v1.0.0")
+	if task == nil {
+		t.Fatal("no task recorded")
+	}
+	_, failed, outcome := task.snapshot()
+	if !failed {
+		t.Fatal("task not failed")
+	}
+	if outcome != "Failed tool v1.0.0" {
+		t.Fatalf("task outcome = %q, want %q", outcome, "Failed tool v1.0.0")
 	}
 }

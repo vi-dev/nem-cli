@@ -30,5 +30,13 @@ func hintFor(err error) string {
 	if errors.As(err, &dme) {
 		return "Re-lock with `nem use <pkg>@<version>`"
 	}
+	var ute *UnpinnedToolsError
+	if errors.As(err, &ute) {
+		return "Pin exact versions in nem.toml or run `nem use <pkg>@<version>`"
+	}
+	var pce *resolve.PinConflictError
+	if errors.As(err, &pce) {
+		return "Re-pin with `nem use <pkg>@<version>` or unuse the tool requiring it"
+	}
 	return ""
 }

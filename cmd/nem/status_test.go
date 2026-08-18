@@ -41,6 +41,41 @@ func TestStatusListsToolsAndEnv(t *testing.T) {
 	}
 }
 
+func TestStatusCatalogSwitchShowsUnlocked(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	if err := os.WriteFile(filepath.Join(projDir, "nem.toml"),
+		[]byte("[tools]\n\"other:tool\" = \"v1.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lockBody := "# machine-written by nem — do not edit\nversion = 2\n\n" +
+		"[[package]]\nname = \"tool\"\nversion = \"v1.0.0\"\ncatalog = \"demo\"\n" +
+		"direct = true\nplatforms = []\non_path = true\n"
+	if err := os.WriteFile(filepath.Join(projDir, "nem.lock"), []byte(lockBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errb, err := runNem(t, nemHomeDir, "status")
+	if err != nil {
+		t.Fatalf("status: %v\nstderr: %s", err, errb)
+	}
+	row := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "tool") && !strings.Contains(line, "PACKAGE") {
+			row = line
+			break
+		}
+	}
+	if row == "" {
+		t.Fatalf("no tool row in output:\n%s", out)
+	}
+	if strings.Contains(row, "yes") {
+		t.Fatalf("a catalog-switched entry must not report locked: %q", row)
+	}
+}
+
 func TestStatusInstalledColumn(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	catalogRoot := downloadableDirCatalog(t)

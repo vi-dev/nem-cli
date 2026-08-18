@@ -99,3 +99,29 @@ func TestLoadLockRejectsUnknownField(t *testing.T) {
 		t.Fatalf("want error mentioning the unknown key, got %v", err)
 	}
 }
+
+func TestLockfileCovers(t *testing.T) {
+	lf := &Lockfile{Packages: []LockEntry{
+		{Name: "go", Version: "v1.26.5", Catalog: "official", Direct: true},
+		{Name: "zlib", Version: "v1.3.0", Catalog: "official", Direct: false},
+	}}
+	cases := []struct {
+		name string
+		tool ToolEntry
+		want bool
+	}{
+		{"unqualified match", ToolEntry{Key: ToolKey{Name: "go"}, Version: "v1.26.5"}, true},
+		{"catalog match", ToolEntry{Key: ToolKey{Catalog: "official", Name: "go"}, Version: "v1.26.5"}, true},
+		{"version mismatch", ToolEntry{Key: ToolKey{Name: "go"}, Version: "v1.27.0"}, false},
+		{"catalog mismatch", ToolEntry{Key: ToolKey{Catalog: "other", Name: "go"}, Version: "v1.26.5"}, false},
+		{"dependency-only entry", ToolEntry{Key: ToolKey{Name: "zlib"}, Version: "v1.3.0"}, false},
+		{"absent", ToolEntry{Key: ToolKey{Name: "jq"}, Version: "v1.7.1"}, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := lf.Covers(c.tool); got != c.want {
+				t.Fatalf("Covers(%+v) = %v, want %v", c.tool, got, c.want)
+			}
+		})
+	}
+}

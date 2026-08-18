@@ -43,6 +43,15 @@ func (e *SonameConflictError) Error() string {
 	return fmt.Sprintf("package %s: incompatible dependency ranges %q and %q", e.Name, e.A, e.B)
 }
 
+// PinConflictError reports a directly-pinned tool whose pin lost the
+// resolution: a dependency edge demands a different version, and honoring
+// it would install something the manifest's pin doesn't declare.
+type PinConflictError struct{ Name, Pinned, Required string }
+
+func (e *PinConflictError) Error() string {
+	return fmt.Sprintf("package %s: pinned %s but a dependency requires %s", e.Name, e.Pinned, e.Required)
+}
+
 // compatComponents splits a version or compat string into dotted components,
 // dropping an optional leading "v".
 func compatComponents(s string) []string {
@@ -170,6 +179,19 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 			if err := walk(ctx, sources, r.name, r.version, r.catalog, r.digest, r.pkg, directContribution(r.pkg), platform, visited, accs); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	// An exact pin must survive reconciliation verbatim: a dependency edge
+	// floating it to another version would install something the manifest
+	// doesn't declare, so that's a conflict for the user to resolve, not a
+	// silent override.
+	for _, t := range tools {
+		if t.Version == "" {
+			continue
+		}
+		if a := accs[t.Key.Name]; a != nil && a.version != t.Version {
+			return nil, &PinConflictError{Name: t.Key.Name, Pinned: t.Version, Required: a.version}
 		}
 	}
 
