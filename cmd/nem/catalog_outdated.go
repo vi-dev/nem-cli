@@ -85,7 +85,7 @@ func newCatalogOutdatedCmd() *cobra.Command {
 					return nil
 				})
 			}
-			g.Wait() // workers record errors in rows and never fail the group
+			_ = g.Wait() // workers record errors in rows and never fail the group
 
 			outdated := 0
 			var tableRows [][]string
