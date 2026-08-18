@@ -1,12 +1,16 @@
 package ocix
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
 )
 
@@ -155,5 +159,89 @@ func TestNewRemoteRepositoryPlainHTTP(t *testing.T) {
 		if repo.PlainHTTP != c.want {
 			t.Errorf("NewRemoteRepository(%q).PlainHTTP = %v, want %v", c.ref, repo.PlainHTTP, c.want)
 		}
+	}
+}
+
+func TestFetchIndexReturnsParsedIndex(t *testing.T) {
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	PushFakeCatalogForTest(t, store, []FakeEntry{
+		{Name: "atool", Description: "A tool", Latest: "1.0.0", YAML: []byte("name: atool")},
+	}, SchemaVersion)
+
+	idx, desc, err := FetchIndex(context.Background(), store, "v2")
+	if err != nil {
+		t.Fatalf("FetchIndex: %v", err)
+	}
+	if len(idx.Manifests) != 1 {
+		t.Fatalf("manifests = %d, want 1", len(idx.Manifests))
+	}
+	if got := idx.Manifests[0].Annotations[AnnotationTitle]; got != "atool" {
+		t.Fatalf("title = %q, want atool", got)
+	}
+	if desc.Digest == "" {
+		t.Fatal("descriptor digest is empty")
+	}
+}
+
+func TestFetchIndexRejectsWrongSchema(t *testing.T) {
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	PushFakeCatalogForTest(t, store, nil, "999")
+
+	if _, _, err := FetchIndex(context.Background(), store, "v2"); err == nil {
+		t.Fatal("FetchIndex accepted schema 999, want error")
+	}
+}
+
+func TestFetchPkgBytesReturnsLayer(t *testing.T) {
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	yaml := []byte("name: atool\n")
+	PushFakeCatalogForTest(t, store, []FakeEntry{
+		{Name: "atool", Latest: "1.0.0", YAML: yaml},
+	}, SchemaVersion)
+	idx, _, err := FetchIndex(context.Background(), store, "v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := FetchPkgBytes(context.Background(), store, idx.Manifests[0])
+	if err != nil {
+		t.Fatalf("FetchPkgBytes: %v", err)
+	}
+	if !bytes.Equal(got, yaml) {
+		t.Fatalf("bytes = %q, want %q", got, yaml)
+	}
+}
+
+func TestFetchPkgBytesRejectsManifestWithoutPkgLayer(t *testing.T) {
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An archive image manifest has no MediaTypePkg layer.
+	PushFakeArchive(t, store, "1.0.0", map[string][]byte{"linux/amd64": []byte("a")})
+	desc, err := store.Resolve(context.Background(), "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	idxData, err := content.FetchAll(context.Background(), store, desc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var archIdx ocispec.Index
+	if err := json.Unmarshal(idxData, &archIdx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := FetchPkgBytes(context.Background(), store, archIdx.Manifests[0]); err == nil {
+		t.Fatal("FetchPkgBytes accepted a manifest without a pkg.yaml layer, want error")
 	}
 }

@@ -140,27 +140,35 @@ func SyncFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef, storePath st
 	return copied.Digest.String(), nil
 }
 
+// FetchIndex resolves srcRef on src, fetches and parses the catalog
+// index, and checks its schema annotation. It reads only the index blob —
+// nothing else from the catalog closure.
+func FetchIndex(ctx context.Context, src oras.ReadOnlyTarget, srcRef string) (ocispec.Index, ocispec.Descriptor, error) {
+	var idx ocispec.Index
+	desc, err := src.Resolve(ctx, srcRef)
+	if err != nil {
+		return idx, ocispec.Descriptor{}, fmt.Errorf("resolve catalog ref %s: %w", srcRef, err)
+	}
+	data, err := content.FetchAll(ctx, src, desc)
+	if err != nil {
+		return idx, ocispec.Descriptor{}, fmt.Errorf("read catalog index: %w", err)
+	}
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return idx, ocispec.Descriptor{}, fmt.Errorf("parse catalog index: %w", err)
+	}
+	if err := validateSchema(idx); err != nil {
+		return idx, ocispec.Descriptor{}, err
+	}
+	return idx, desc, nil
+}
+
 // validateSrcSchema resolves srcRef on src, fetches the index bytes, and
 // checks the catalog schema version, without touching any local state. It
 // returns the resolved descriptor so the caller can verify the digest
 // actually copied still matches what was validated.
 func validateSrcSchema(ctx context.Context, src oras.ReadOnlyTarget, srcRef string) (ocispec.Descriptor, error) {
-	desc, err := src.Resolve(ctx, srcRef)
-	if err != nil {
-		return ocispec.Descriptor{}, fmt.Errorf("resolve catalog ref %s: %w", srcRef, err)
-	}
-	data, err := content.FetchAll(ctx, src, desc)
-	if err != nil {
-		return ocispec.Descriptor{}, fmt.Errorf("read catalog index: %w", err)
-	}
-	var idx ocispec.Index
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return ocispec.Descriptor{}, fmt.Errorf("parse catalog index: %w", err)
-	}
-	if err := validateSchema(idx); err != nil {
-		return ocispec.Descriptor{}, err
-	}
-	return desc, nil
+	_, desc, err := FetchIndex(ctx, src, srcRef)
+	return desc, err
 }
 
 // validateSchema checks idx carries the catalog schema version this build
@@ -203,6 +211,29 @@ func LoadIndex(ctx context.Context, storePath string) (ocispec.Index, error) {
 	return idx, nil
 }
 
+// FetchPkgBytes fetches the image manifest at man from src and returns
+// the raw pkg.yaml bytes of its MediaTypePkg layer.
+func FetchPkgBytes(ctx context.Context, src oras.ReadOnlyTarget, man ocispec.Descriptor) ([]byte, error) {
+	manData, err := content.FetchAll(ctx, src, man)
+	if err != nil {
+		return nil, fmt.Errorf("read manifest: %w", err)
+	}
+	var m ocispec.Manifest
+	if err := json.Unmarshal(manData, &m); err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
+	}
+	for _, layer := range m.Layers {
+		if layer.MediaType == MediaTypePkg {
+			data, err := content.FetchAll(ctx, src, layer)
+			if err != nil {
+				return nil, fmt.Errorf("read pkg.yaml layer: %w", err)
+			}
+			return data, nil
+		}
+	}
+	return nil, errors.New("manifest has no pkg.yaml layer")
+}
+
 // LoadPkgBytes returns the raw pkg.yaml bytes and manifest digest for name
 // from the locally synced catalog.
 func LoadPkgBytes(ctx context.Context, storePath, name string) ([]byte, string, error) {
@@ -218,24 +249,11 @@ func LoadPkgBytes(ctx context.Context, storePath, name string) ([]byte, string, 
 		if err != nil {
 			return nil, "", fmt.Errorf("open catalog store %s: %w", storePath, err)
 		}
-		manData, err := content.FetchAll(ctx, store, m)
+		data, err := FetchPkgBytes(ctx, store, m)
 		if err != nil {
-			return nil, "", fmt.Errorf("read manifest for %s: %w", name, err)
+			return nil, "", fmt.Errorf("load pkg.yaml for %s: %w", name, err)
 		}
-		var man ocispec.Manifest
-		if err := json.Unmarshal(manData, &man); err != nil {
-			return nil, "", fmt.Errorf("parse manifest for %s: %w", name, err)
-		}
-		for _, layer := range man.Layers {
-			if layer.MediaType == MediaTypePkg {
-				data, err := content.FetchAll(ctx, store, layer)
-				if err != nil {
-					return nil, "", fmt.Errorf("read pkg.yaml for %s: %w", name, err)
-				}
-				return data, m.Digest.String(), nil
-			}
-		}
-		return nil, "", fmt.Errorf("manifest for %s has no pkg.yaml layer", name)
+		return data, m.Digest.String(), nil
 	}
 	return nil, "", &PkgNotInIndexError{Name: name}
 }
