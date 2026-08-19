@@ -194,3 +194,21 @@ versions: [v1.0.0]
 		t.Fatalf("want invalid-compat error, got %v", err)
 	}
 }
+
+func TestValidateActionTemplates(t *testing.T) {
+	p := valid()
+	p.Install = append(p.Install, Action{Copy: &CopyAction{Src: "{{.Bogus}}", Dst: "bin/x"}})
+	if err := p.Validate(); err == nil {
+		t.Fatal("want error for unknown template field in copy src")
+	}
+	p = valid()
+	p.Install = append(p.Install, Action{Mkdir: "{{.OS"})
+	if err := p.Validate(); err == nil {
+		t.Fatal("want error for malformed template in mkdir")
+	}
+	p = valid()
+	p.Install = append(p.Install, Action{Copy: &CopyAction{Src: "tool-{{.Arch}}", Dst: "bin/tool"}})
+	if err := p.Validate(); err != nil {
+		t.Fatalf("templated copy rejected: %v", err)
+	}
+}

@@ -190,7 +190,7 @@ func TestRunActionsExtractTarGzStripLandsFilesModesSymlink(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(1), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(1), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 
@@ -251,7 +251,7 @@ func TestRunActionsExtractZip(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 
@@ -288,7 +288,7 @@ func TestRunActionsExtractEscapeEntryRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -310,7 +310,7 @@ func TestRunActionsExtractZipEscapeEntryRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil || !strings.Contains(err.Error(), "escapes staging dir") {
 		t.Fatalf("error = %v, want containment error", err)
 	}
@@ -329,7 +329,7 @@ func TestRunActionsExtractAbsoluteSymlinkTargetRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -351,7 +351,7 @@ func TestRunActionsExtractEscapingRelativeSymlinkTargetRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -374,7 +374,7 @@ func TestRunActionsExtractHardlinkRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -396,7 +396,7 @@ func TestRunActionsExtractZstdRoundTrip(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "bin", "tool"))
@@ -418,7 +418,7 @@ func TestRunActionsExtractXzRoundTrip(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "bin", "tool"))
@@ -440,7 +440,7 @@ func TestRunActionsExtractBzip2SniffAndDecode(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "a", "hello.txt"))
@@ -461,7 +461,7 @@ func TestRunActionsExtractPlainTar(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "plain.txt"))
@@ -478,7 +478,7 @@ func TestRunActionsExtractUnrecognizedFormatErrors(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, []byte("not an archive at all"))
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil || !strings.Contains(err.Error(), "unrecognized archive format") {
 		t.Fatalf("error = %v, want unrecognized-format error", err)
 	}
@@ -496,7 +496,7 @@ func TestRunActionsExtractUnsupportedTarTypeRejected(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil || !strings.Contains(err.Error(), "unsupported tar type") {
 		t.Fatalf("error = %v, want unsupported-type error", err)
 	}
@@ -515,7 +515,7 @@ func TestRunActionsExtractStripDropsTopDirEntry(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(1), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(1), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	entries, err := os.ReadDir(staging)
@@ -563,7 +563,7 @@ func TestRunActionsExtractSymlinkChainEscapeRejected(t *testing.T) {
 	}))
 	artifact := writeArtifact(t, container, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -586,7 +586,7 @@ func TestRunActionsExtractZipSymlinkChainEscapeRejected(t *testing.T) {
 	})
 	artifact := writeArtifact(t, container, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -617,7 +617,7 @@ func TestRunActionsExtractTwoHopSymlinkChainEscapeRejected(t *testing.T) {
 	}))
 	artifact := writeArtifact(t, container, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -648,7 +648,7 @@ func TestRunActionsExtractSymlinkChainEscapeViaNestedEntryRejected(t *testing.T)
 	}))
 	artifact := writeArtifact(t, container, archive)
 
-	err := install.RunActions(extractPkg(0), staging, artifact, spec.Current())
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -670,7 +670,7 @@ func TestRunActionsExtractPaxGlobalHeaderSkipped(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "real.txt"))
@@ -699,7 +699,7 @@ func TestRunActionsExtractPlainTarWithPKPrefixedFirstEntry(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "PKGBUILD"))
@@ -720,7 +720,7 @@ func TestRunActionsExtractNegativeStripNoPanic(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(-1), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(-1), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(staging, "a", "b", "file"))
@@ -753,7 +753,7 @@ func TestRunActionsExtractLargeTarGzStreams(t *testing.T) {
 	}
 	artifact := writeArtifact(t, tmp, archive)
 
-	if err := install.RunActions(extractPkg(0), staging, artifact, spec.Current()); err != nil {
+	if err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current()); err != nil {
 		t.Fatalf("RunActions: %v", err)
 	}
 

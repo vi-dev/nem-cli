@@ -78,6 +78,9 @@ func (p *Package) Validate() error {
 		case a.Extract == nil && a.Mkdir == "":
 			return fmt.Errorf("install[%d]: empty action", i)
 		}
+		if _, err := ExpandActionPaths(a, "v0", Platform{OS: "darwin", Arch: "arm64"}); err != nil {
+			return fmt.Errorf("install[%d]: %w", i, err)
+		}
 	}
 	if len(p.Versions) == 0 {
 		return errors.New("versions is required and must be non-empty")

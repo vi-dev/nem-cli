@@ -83,3 +83,40 @@ func TestSha256Lookup(t *testing.T) {
 		t.Fatalf("missing platform: %v", err)
 	}
 }
+
+func TestExpandActionPaths(t *testing.T) {
+	plat := Platform{"linux", "arm64"}
+	copyA := Action{Copy: &CopyAction{Src: "bin-{{.OS}}/tool-{{.Arch}}", Dst: "bin/{{replace .Arch \"arm64\" \"aa\"}}", Mode: 0o755}}
+	got, err := ExpandActionPaths(copyA, "1.2.3", plat)
+	if err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	if got.Copy.Src != "bin-linux/tool-arm64" || got.Copy.Dst != "bin/aa" || got.Copy.Mode != 0o755 {
+		t.Fatalf("copy expanded = %+v", got.Copy)
+	}
+	if copyA.Copy.Src != "bin-{{.OS}}/tool-{{.Arch}}" {
+		t.Fatalf("original mutated: %+v", copyA.Copy)
+	}
+
+	move := Action{Move: &MoveAction{Src: "pkg-{{.Version}}/x", Dst: "y"}}
+	if got, err = ExpandActionPaths(move, "1.2.3", plat); err != nil || got.Move.Src != "pkg-1.2.3/x" {
+		t.Fatalf("move: %+v, %v", got.Move, err)
+	}
+
+	mk := Action{Mkdir: "cache/{{.OS}}"}
+	if got, err = ExpandActionPaths(mk, "1.2.3", plat); err != nil || got.Mkdir != "cache/linux" {
+		t.Fatalf("mkdir: %q, %v", got.Mkdir, err)
+	}
+
+	// The artifact token is itself template syntax and must survive
+	// expansion verbatim for the runner's literal check.
+	art := Action{Copy: &CopyAction{Src: ArtifactToken, Dst: "bin/t"}}
+	if got, err = ExpandActionPaths(art, "1.2.3", plat); err != nil || got.Copy.Src != ArtifactToken {
+		t.Fatalf("artifact token: %+v, %v", got.Copy, err)
+	}
+
+	bad := Action{Copy: &CopyAction{Src: "{{.Bogus}}", Dst: "d"}}
+	if _, err = ExpandActionPaths(bad, "1.2.3", plat); err == nil {
+		t.Fatal("want error for unknown template field")
+	}
+}

@@ -15,11 +15,13 @@ import (
 
 // artifactToken is the literal copy src value that refers to the verified
 // downloaded artifact rather than a path inside staging.
-const artifactToken = "{{.Artifact}}"
+const artifactToken = spec.ArtifactToken
 
 // RunActions executes pkg.Install in order inside stagingDir, skipping
-// actions whose platform constraint excludes platform. artifactPath is
-// the verified downloaded artifact ({{.Artifact}} in copy src).
+// actions whose platform constraint excludes platform and expanding each
+// action's path fields as templates against version and platform.
+// artifactPath is the verified downloaded artifact ({{.Artifact}} in copy
+// src).
 //
 // Every filesystem mutation goes through an os.Root rooted at stagingDir:
 // a purely lexical containment check on an action's own path (or a
@@ -28,7 +30,7 @@ const artifactToken = "{{.Artifact}}"
 // really resolve outside staging once the OS follows it. os.Root refuses
 // any traversal that would leave the root regardless of how many symlink
 // hops are involved.
-func RunActions(pkg *spec.Package, stagingDir, artifactPath string, platform spec.Platform) error {
+func RunActions(pkg *spec.Package, stagingDir, artifactPath, version string, platform spec.Platform) error {
 	root, err := os.OpenRoot(stagingDir)
 	if err != nil {
 		return fmt.Errorf("open staging dir: %w", err)
@@ -39,6 +41,10 @@ func RunActions(pkg *spec.Package, stagingDir, artifactPath string, platform spe
 	for i, a := range pkg.Install {
 		if !spec.PlatformsInclude(a.Platforms, platform) {
 			continue
+		}
+		a, err := spec.ExpandActionPaths(a, version, platform)
+		if err != nil {
+			return fmt.Errorf("install[%d]: %w", i, err)
 		}
 		if err := runAction(a, root, artifactPath); err != nil {
 			return fmt.Errorf("install[%d]: %w", i, err)
