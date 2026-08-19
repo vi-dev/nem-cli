@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/ocix"
@@ -36,7 +37,7 @@ func hintFor(err error) string {
 	}
 	var pce *resolve.PinConflictError
 	if errors.As(err, &pce) {
-		return "Re-pin with `nem use <pkg>@<version>` or unuse the tool requiring it"
+		return fmt.Sprintf("Re-pin with `nem use %s@%s` or unuse the tool requiring it", pce.Name, pce.Required)
 	}
 	return ""
 }

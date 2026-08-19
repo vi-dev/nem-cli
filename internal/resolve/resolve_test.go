@@ -692,6 +692,172 @@ versions:
 	}
 }
 
+// TestResolveBareDepDefersToPinnedRoot proves a version-less dep edge is
+// floating: it accepts whatever version the resolution already chose, so a
+// direct pin wins over it regardless of which side reconciles first.
+func TestResolveBareDepDefersToPinnedRoot(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.0.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	orders := map[string][]resolve.Tool{
+		"pin first": {
+			{Key: project.ToolKey{Name: "a"}, Version: "v1.0.0"},
+			{Key: project.ToolKey{Name: "b"}},
+		},
+		"dep first": {
+			{Key: project.ToolKey{Name: "b"}},
+			{Key: project.ToolKey{Name: "a"}, Version: "v1.0.0"},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if a := entry(t, res, "a"); a.Version != "v1.0.0" || !a.Direct {
+				t.Fatalf("entry a: %+v, want pinned v1.0.0", a)
+			}
+		})
+	}
+}
+
+func TestResolveBareDepAloneFloatsToLatest(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.0.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "b"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if a := entry(t, res, "a"); a.Version != "v2.0.0" {
+		t.Fatalf("unconstrained dep alone should float to latest, got %+v", a)
+	}
+}
+
+// TestResolveBareDepDefersToCompatRange reconciles a compat-ranged link dep
+// first and a bare dep second: the bare edge must adopt the range's
+// selection instead of raising a soname conflict.
+func TestResolveBareDepDefersToCompatRange(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: p1
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p2
+deps: [{name: openssl}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v4.0.0, v3.5.1]
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "p1"}}, {Key: project.ToolKey{Name: "p2"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if v := entry(t, res, "openssl").Version; v != "v3.5.1" {
+		t.Fatalf("openssl = %s, want the compat range's v3.5.1", v)
+	}
+}
+
+// TestResolveBuildBareDepDefersToExactDep mirrors floating semantics on the
+// build-deps path: a bare build dep must not float a package above another
+// edge's exact version requirement.
+func TestResolveBuildBareDepDefersToExactDep(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v2.0.0, v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+    version: v1.0.0
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	pkg := &spec.Package{
+		Schema: 2,
+		Name:   "tool",
+		Build: &spec.Build{
+			Deps: []spec.Dep{
+				{Name: "a"},
+				{Name: "b"},
+			},
+		},
+	}
+	res, err := resolve.ResolveBuild(context.Background(), pkg, namedSources(root))
+	if err != nil {
+		t.Fatalf("ResolveBuild: %v", err)
+	}
+	if a := entry(t, res, "a"); a.Version != "v1.0.0" {
+		t.Fatalf("bare build dep floated a to %s over b's exact v1.0.0", a.Version)
+	}
+}
+
 func TestResolvePinnedRootDepAgreementResolves(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `

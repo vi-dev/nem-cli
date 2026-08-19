@@ -574,7 +574,7 @@ func TestHintForTable(t *testing.T) {
 		{"catalog not found", &catalog.CatalogNotFoundError{Name: "dev"}, "nem catalog add"},
 		{"package not found", &catalog.PackageNotFoundError{Name: "go", Catalogs: []string{"official"}}, "nem catalog update"},
 		{"unsupported platform", &resolve.UnsupportedPlatformError{Name: "go", Version: "v1"}, "none of nem's platforms"},
-		{"pin conflict", &resolve.PinConflictError{Name: "go", Pinned: "v1", Required: "v2"}, "nem use"},
+		{"pin conflict", &resolve.PinConflictError{Name: "go", Pinned: "v1", Required: "v2"}, "nem use go@v2"},
 		{"unrecognized", errors.New("boom"), ""},
 	}
 	for _, c := range cases {

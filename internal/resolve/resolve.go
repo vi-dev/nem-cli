@@ -114,7 +114,9 @@ func mergeCompat(a, b string) (string, bool) {
 
 // acc is one package's reconciled state across the whole resolution: the
 // currently-winning version and its source, plus the union of platforms
-// that need it.
+// that need it. floating marks a version no contribution has demanded yet
+// (only floating edges have reached the package), so any later exact
+// requirement may replace it.
 type acc struct {
 	version      string
 	compat       string
@@ -124,6 +126,7 @@ type acc struct {
 	platforms    map[spec.Platform]bool
 	onPath       bool
 	onLoaderPath bool
+	floating     bool
 }
 
 // contribution is how a single reach of a package feeds env composition:
@@ -249,7 +252,7 @@ func ResolveBuild(ctx context.Context, pkg *spec.Package, sources []catalog.Name
 // platform — that first-wins guard is what stops a dependency cycle from
 // recursing forever.
 func walk(ctx context.Context, sources []catalog.Named, name, version, catName, digest string, pkg *spec.Package, contrib contribution, platform spec.Platform, visited map[string]bool, accs map[string]*acc) error {
-	if err := reconcile(accs, name, version, "", catName, digest, pkg, contrib, platform); err != nil {
+	if err := reconcile(accs, name, version, "", false, catName, digest, pkg, contrib, platform); err != nil {
 		return err
 	}
 	if visited[name] {
@@ -272,11 +275,11 @@ func walkDeps(ctx context.Context, sources []catalog.Named, pkg *spec.Package, p
 		if !supports(depPkg, platform) {
 			continue
 		}
-		depVersion, err := resolveDepVersion(depPkg, dep, depCat)
+		depVersion, floating, err := resolveDepVersion(depPkg, dep, depCat)
 		if err != nil {
 			return err
 		}
-		if err := reconcile(accs, dep.Name, depVersion, dep.Compat, depCat, depDig, depPkg, edgeContribution(dep.Kind, depPkg), platform); err != nil {
+		if err := reconcile(accs, dep.Name, depVersion, dep.Compat, floating, depCat, depDig, depPkg, edgeContribution(dep.Kind, depPkg), platform); err != nil {
 			return err
 		}
 		if visited[dep.Name] {
@@ -291,15 +294,19 @@ func walkDeps(ctx context.Context, sources []catalog.Named, pkg *spec.Package, p
 }
 
 // resolveDepVersion picks a dep's version: the highest match within a link
-// dep's compat range, else exact-or-latest.
-func resolveDepVersion(pkg *spec.Package, dep spec.Dep, catName string) (string, error) {
+// dep's compat range, else exact-or-latest. A version-less, compat-less dep
+// is floating: it names no version at all, so its latest pick is only a
+// default for reconcile to keep when nothing else determines the package's
+// version.
+func resolveDepVersion(pkg *spec.Package, dep spec.Dep, catName string) (version string, floating bool, err error) {
 	if dep.Kind == spec.DepKindLink && dep.Compat != "" {
 		if v := selectCompat(pkg.Versions, dep.Compat); v != "" {
-			return v, nil
+			return v, false, nil
 		}
-		return "", &catalog.VersionNotFoundError{Name: dep.Name, Version: dep.Compat + ".x", Catalog: catName}
+		return "", false, &catalog.VersionNotFoundError{Name: dep.Name, Version: dep.Compat + ".x", Catalog: catName}
 	}
-	return resolveVersion(pkg, dep.Name, dep.Version, catName)
+	version, err = resolveVersion(pkg, dep.Name, dep.Version, catName)
+	return version, dep.Version == "", err
 }
 
 // reconcile records name's contribution for platform, keeping the highest
@@ -318,7 +325,14 @@ func resolveDepVersion(pkg *spec.Package, dep spec.Dep, catName string) (string,
 // the winner regardless of higher's ordering. compat ranges that don't
 // intersect, or a merged range with no matching version among the deps
 // already reconciled, report SonameConflictError.
-func reconcile(accs map[string]*acc, name, version, compat, catName, digest string, pkg *spec.Package, contrib contribution, platform spec.Platform) error {
+//
+// A floating contribution (a dep edge naming no version or compat) is
+// satisfied by any version, so it never overrides or conflicts with a
+// non-floating choice: its resolved-latest only stands while every
+// contribution seen for name is floating. The first non-floating
+// contribution replaces a floating version outright — even a lower one —
+// and on an equal version leaves the first-processed attribution in place.
+func reconcile(accs map[string]*acc, name, version, compat string, floating bool, catName, digest string, pkg *spec.Package, contrib contribution, platform spec.Platform) error {
 	a, ok := accs[name]
 	if !ok {
 		accs[name] = &acc{
@@ -326,6 +340,7 @@ func reconcile(accs map[string]*acc, name, version, compat, catName, digest stri
 			platforms:    map[spec.Platform]bool{platform: true},
 			onPath:       contrib.onPath,
 			onLoaderPath: contrib.onLoaderPath,
+			floating:     floating,
 		}
 		return nil
 	}
@@ -344,18 +359,26 @@ func reconcile(accs map[string]*acc, name, version, compat, catName, digest stri
 		if selected == "" {
 			return conflict
 		}
-		// Only a non-compat (exact/latest) contribution is range-checked here;
-		// a compat contribution was already picked within a compatible range.
-		// A non-compat version outside the range is a conflict — resolving it
-		// silently instead would let a compat edge quietly override an
-		// explicit/latest pick.
-		if compat == "" && !matchesCompat(version, merged) {
+		// Only a non-compat exact contribution is range-checked here; a compat
+		// contribution was already picked within a compatible range, and a
+		// floating one accepts the range's selection by definition. A non-compat
+		// exact version outside the range is a conflict — resolving it silently
+		// instead would let a compat edge quietly override an explicit pick.
+		if compat == "" && !floating && !matchesCompat(version, merged) {
 			return conflict
 		}
 		a.compat, a.version = merged, selected
 		return nil
 	}
-	if higher(version, a.version) {
+	switch {
+	case a.floating && !floating:
+		if version != a.version {
+			a.version, a.catalog, a.digest, a.pkg = version, catName, digest, pkg
+		}
+		a.floating = false
+	case !a.floating && floating:
+		// The accumulated version already satisfies a floating edge.
+	case higher(version, a.version):
 		a.version, a.catalog, a.digest, a.pkg = version, catName, digest, pkg
 	}
 	return nil
