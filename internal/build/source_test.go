@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/ulikunitz/xz"
 
 	"github.com/vi-dev/nem-cli/internal/fetch"
@@ -291,6 +292,61 @@ func TestUnpackSourceXz(t *testing.T) {
 	txz := makeTarXz(t, map[string]string{"src-1.0/configure": "#!/bin/sh\n", "src-1.0/main.c": "x"})
 	arc := filepath.Join(t.TempDir(), "s.tar.xz")
 	if err := os.WriteFile(arc, txz, 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+	root, err := unpackSource(arc, t.TempDir())
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if filepath.Base(root) != "src-1.0" {
+		t.Fatalf("root = %q, want basename src-1.0", root)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "configure"))
+	if err != nil {
+		t.Fatalf("read configure: %v", err)
+	}
+	if string(got) != "#!/bin/sh\n" {
+		t.Fatalf("configure content = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "main.c")); err != nil {
+		t.Fatalf("expected main.c at stripped root: %v", err)
+	}
+}
+
+func makeTarZst(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw, err := zstd.NewWriter(&buf)
+	if err != nil {
+		t.Fatalf("zstd writer: %v", err)
+	}
+	tw := tar.NewWriter(zw)
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("write tar header %s: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("write tar content %s: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zstd writer: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestUnpackSourceZstd(t *testing.T) {
+	tzst := makeTarZst(t, map[string]string{"src-1.0/configure": "#!/bin/sh\n", "src-1.0/main.c": "x"})
+	arc := filepath.Join(t.TempDir(), "s.tar.zst")
+	if err := os.WriteFile(arc, tzst, 0o644); err != nil {
 		t.Fatalf("write archive: %v", err)
 	}
 	root, err := unpackSource(arc, t.TempDir())
