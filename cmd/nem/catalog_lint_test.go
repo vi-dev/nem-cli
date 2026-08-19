@@ -51,12 +51,31 @@ func TestCatalogLintCleanCatalog(t *testing.T) {
 	nemHome := t.TempDir()
 	catDir := writeLintFixture(t, map[string]string{"go": lintFixtureGoPkg})
 
-	out, _, err := runNem(t, nemHome, "catalog", "lint", catDir)
+	out, errb, err := runNem(t, nemHome, "catalog", "lint", catDir)
 	if err != nil {
 		t.Fatalf("lint: %v", err)
 	}
-	if !strings.Contains(out, "clean") {
-		t.Fatalf("stdout = %q, want a clean-summary message", out)
+	if !strings.Contains(errb, "OK Catalog is clean: no findings") {
+		t.Fatalf("stderr = %q, want the clean-summary success line", errb)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want empty", out)
+	}
+}
+
+func TestCatalogLintCleanSummarySuppressedByQuiet(t *testing.T) {
+	nemHome := t.TempDir()
+	catDir := writeLintFixture(t, map[string]string{"go": lintFixtureGoPkg})
+
+	out, errb, err := runNem(t, nemHome, "catalog", "lint", catDir, "--quiet")
+	if err != nil {
+		t.Fatalf("lint: %v", err)
+	}
+	if strings.Contains(errb, "clean") {
+		t.Fatalf("stderr = %q, want no clean summary under --quiet", errb)
+	}
+	if out != "" {
+		t.Fatalf("stdout = %q, want empty", out)
 	}
 }
 
@@ -72,11 +91,28 @@ func TestCatalogLintDefectiveCatalog(t *testing.T) {
 	if exitErr.Code != 1 {
 		t.Fatalf("exit code = %d, want 1", exitErr.Code)
 	}
-	if !strings.Contains(errb, "reserved") {
-		t.Fatalf("stderr = %q, want the reserved-env finding", errb)
+	if !strings.Contains(errb, "WARN ") || !strings.Contains(errb, "reserved") {
+		t.Fatalf("stderr = %q, want the reserved-env finding as a WARN line", errb)
 	}
 	if out != "" {
 		t.Fatalf("stdout = %q, want empty", out)
+	}
+}
+
+func TestCatalogLintFindingsSurviveQuiet(t *testing.T) {
+	nemHome := t.TempDir()
+	catDir := writeLintFixture(t, map[string]string{"go": lintFixtureGoPkgReservedEnv})
+
+	_, errb, err := runNem(t, nemHome, "catalog", "lint", catDir, "--quiet")
+	var exitErr *ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("lint error = %v, want *ExitError", err)
+	}
+	if exitErr.Code != 1 {
+		t.Fatalf("exit code = %d, want 1", exitErr.Code)
+	}
+	if !strings.Contains(errb, "reserved") {
+		t.Fatalf("stderr = %q, want findings despite --quiet", errb)
 	}
 }
 
@@ -85,11 +121,11 @@ func TestCatalogLintDefaultsToCurrentDir(t *testing.T) {
 	catDir := writeLintFixture(t, map[string]string{"go": lintFixtureGoPkg})
 	chdir(t, catDir)
 
-	out, _, err := runNem(t, nemHome, "catalog", "lint")
+	_, errb, err := runNem(t, nemHome, "catalog", "lint")
 	if err != nil {
 		t.Fatalf("lint: %v", err)
 	}
-	if !strings.Contains(out, "clean") {
-		t.Fatalf("stdout = %q, want a clean-summary message", out)
+	if !strings.Contains(errb, "OK Catalog is clean: no findings") {
+		t.Fatalf("stderr = %q, want the clean-summary success line", errb)
 	}
 }

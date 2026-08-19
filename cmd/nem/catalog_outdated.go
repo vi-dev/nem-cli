@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -99,9 +98,7 @@ func newCatalogOutdatedCmd() *cobra.Command {
 				}
 			}
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(rows); err != nil {
+				if err := console.JSON(rows); err != nil {
 					return err
 				}
 			} else if len(tableRows) > 0 {

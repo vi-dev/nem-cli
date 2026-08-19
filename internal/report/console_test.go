@@ -105,6 +105,63 @@ func TestHintSuppressedByQuiet(t *testing.T) {
 	}
 }
 
+func TestDataGoesToStdoutVerbatim(t *testing.T) {
+	c, out, errb := newTest(Options{Color: ColorNever})
+	c.Data("%s v%s\n", "go", "1.26.5")
+	if got, want := out.String(), "go v1.26.5\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if errb.Len() != 0 {
+		t.Errorf("data leaked to stderr: %q", errb.String())
+	}
+}
+
+func TestDataIgnoresQuiet(t *testing.T) {
+	c, out, _ := newTest(Options{Quiet: true, Color: ColorNever})
+	c.Data("payload\n")
+	if out.String() != "payload\n" {
+		t.Errorf("quiet suppressed data output: %q", out.String())
+	}
+}
+
+func TestDataNeverColored(t *testing.T) {
+	c, out, _ := newTest(Options{Color: ColorAlways})
+	c.Data("plain\n")
+	if strings.Contains(out.String(), "\x1b[") {
+		t.Errorf("data output contains ANSI codes: %q", out.String())
+	}
+}
+
+func TestJSONGoesToStdoutIndented(t *testing.T) {
+	c, out, errb := newTest(Options{Color: ColorNever})
+	if err := c.JSON(map[string]string{"name": "go"}); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if got, want := out.String(), "{\n  \"name\": \"go\"\n}\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
+	}
+	if errb.Len() != 0 {
+		t.Errorf("json leaked to stderr: %q", errb.String())
+	}
+}
+
+func TestJSONIgnoresQuiet(t *testing.T) {
+	c, out, _ := newTest(Options{Quiet: true, Color: ColorNever})
+	if err := c.JSON([]int{1}); err != nil {
+		t.Fatalf("JSON: %v", err)
+	}
+	if out.Len() == 0 {
+		t.Errorf("quiet suppressed json output")
+	}
+}
+
+func TestJSONReturnsEncodeError(t *testing.T) {
+	c, _, _ := newTest(Options{Color: ColorNever})
+	if err := c.JSON(func() {}); err == nil {
+		t.Errorf("expected error encoding a func value")
+	}
+}
+
 func TestColorAutoFollowsTTY(t *testing.T) {
 	c, _, errb := newTest(Options{Color: ColorAuto, IsTTY: true})
 	c.Success("On")

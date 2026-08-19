@@ -21,7 +21,7 @@ func newEnvCmd() *cobra.Command {
 		Short: "Print the shell script that applies the composed environment",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runEnv(cmd, shellName)
+			return runEnv(shellName)
 		},
 	}
 	cmd.Flags().StringVar(&shellName, "shell", "", "shell dialect to render for: bash, zsh, or fish (default: $SHELL)")
@@ -90,7 +90,7 @@ func installMetaLookup(name, version string) (*install.Meta, bool) {
 	return meta, true
 }
 
-func runEnv(cmd *cobra.Command, shellName string) error {
+func runEnv(shellName string) error {
 	if shellName == "" {
 		shellName = defaultShellName()
 	}
@@ -121,6 +121,6 @@ func runEnv(cmd *cobra.Command, shellName string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprint(cmd.OutOrStdout(), script)
+	console.Data("%s", script)
 	return nil
 }

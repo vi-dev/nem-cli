@@ -72,7 +72,7 @@ func TestCatalogPublishDryRunWritesNothing(t *testing.T) {
 	if opened {
 		t.Fatal("dry run must not open the target")
 	}
-	if !strings.Contains(errb, "dry run") {
+	if !strings.Contains(errb, "Dry run") {
 		t.Fatalf("narration = %q, want the dry-run plan", errb)
 	}
 }

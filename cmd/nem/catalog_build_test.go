@@ -42,7 +42,7 @@ func TestCatalogBuildPushFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("catalog build --push --dry-run: %v\n%s", err, errb)
 	}
-	if !strings.Contains(errb, "dry-run") {
+	if !strings.Contains(errb, "Dry-run") {
 		t.Fatalf("expected dry-run narration, got: %s", errb)
 	}
 }

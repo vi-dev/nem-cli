@@ -42,7 +42,7 @@ func newCatalogFmtCmd() *cobra.Command {
 				}
 				dirty++
 				if check {
-					fmt.Fprintln(cmd.OutOrStdout(), p)
+					console.Data("%s\n", p)
 					continue
 				}
 				if err := fsx.WriteAtomic(p, formatted, 0o644); err != nil {

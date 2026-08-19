@@ -153,7 +153,7 @@ func pushBuiltArchive(ctx context.Context, final, name, version string, opts Opt
 	plat := spec.Current()
 	if opts.DryRun {
 		d := content.NewDescriptorFromBytes(ocix.MediaTypeArchive, buf.Bytes())
-		rep.Info("dry-run: would push %s:%s (%s) %s", archivesRef, version, plat, d.Digest)
+		rep.Info("Dry-run: would push %s:%s (%s) %s", archivesRef, version, plat, d.Digest)
 		return archivesRef, false, nil
 	}
 	target, err := archivesOpener(opts.Push, name)
@@ -163,7 +163,7 @@ func pushBuiltArchive(ctx context.Context, final, name, version string, opts Opt
 	if _, pushed, err := ocix.PushArchive(ctx, target, version, plat, buf.Bytes(), opts.Force); err != nil {
 		return "", false, err
 	} else if !pushed {
-		rep.Info("archive %s:%s (%s) unchanged", archivesRef, version, plat)
+		rep.Info("Archive %s:%s (%s) unchanged", archivesRef, version, plat)
 		return archivesRef, false, nil
 	}
 	return archivesRef, true, nil

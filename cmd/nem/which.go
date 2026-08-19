@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 )
 
@@ -12,7 +10,7 @@ func newWhichCmd() *cobra.Command {
 		Short: "Show where a tool resolves in the composed environment",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWhich(cmd, args)
+			return runWhich(args)
 		},
 	}
 	return cmd
@@ -22,7 +20,7 @@ func newWhichCmd() *cobra.Command {
 // through exec's own lookPath, so it reports exactly what `nem exec` would
 // run for that name. Every arg is resolved before the command exits, and
 // the found ones are printed regardless of any earlier miss.
-func runWhich(cmd *cobra.Command, args []string) error {
+func runWhich(args []string) error {
 	_, pathValue, err := composedPath()
 	if err != nil {
 		return err
@@ -36,7 +34,7 @@ func runWhich(cmd *cobra.Command, args []string) error {
 			anyUnresolved = true
 			continue
 		}
-		fmt.Fprintln(cmd.OutOrStdout(), resolved)
+		console.Data("%s\n", resolved)
 	}
 	if anyUnresolved {
 		return &ExitError{Code: 1}

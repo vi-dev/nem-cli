@@ -25,7 +25,7 @@ func newActivateCmd() *cobra.Command {
 		Short: "Activate nem for the current shell",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runActivate(cmd, args, printOnly)
+			return runActivate(args, printOnly)
 		},
 	}
 	cmd.Flags().BoolVar(&printOnly, "print", false, "print the hook block to stdout instead of installing it into the rc file")
@@ -83,7 +83,7 @@ func rcPathFor(d shell.Dialect) (string, error) {
 	}
 }
 
-func runActivate(cmd *cobra.Command, args []string, printOnly bool) error {
+func runActivate(args []string, printOnly bool) error {
 	name := shellArg(args)
 	dialect, err := activationDialect(name)
 	if err != nil {
@@ -91,7 +91,7 @@ func runActivate(cmd *cobra.Command, args []string, printOnly bool) error {
 	}
 
 	if printOnly || !stdoutIsTTY() {
-		fmt.Fprint(cmd.OutOrStdout(), shell.HookBlock(dialect))
+		console.Data("%s", shell.HookBlock(dialect))
 		return nil
 	}
 

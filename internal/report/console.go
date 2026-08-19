@@ -1,9 +1,11 @@
-// Package report renders all user-facing output — narration, diagnostics,
-// tables, and live task progress — that domain packages emit through the
-// Reporter interface.
+// Package report renders all user-facing output: narration, diagnostics,
+// tables, and live task progress that domain packages emit through the
+// Reporter interface, plus the stdout data channel (Data, JSON) commands
+// emit their machine-consumable product through.
 package report
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -157,6 +159,23 @@ func (c *Console) Hint(msg string) {
 	} else {
 		fmt.Fprintf(c.err, "  hint: %s\n", msg)
 	}
+}
+
+// Data writes the command's machine-consumable product to stdout: never
+// colored, never suppressed by Quiet, and verbatim — unlike narration
+// methods it appends no newline, so callers include their own. Like Table
+// it does not coordinate with the live task block — finish tasks before
+// emitting data.
+func (c *Console) Data(format string, a ...any) {
+	fmt.Fprintf(c.out, format, a...)
+}
+
+// JSON writes v to stdout as two-space-indented JSON. Like Data it is
+// never colored or suppressed by Quiet.
+func (c *Console) JSON(v any) error {
+	enc := json.NewEncoder(c.out)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func (c *Console) Blank() {

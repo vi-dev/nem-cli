@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -105,9 +104,7 @@ func newCatalogDiffCmd() *cobra.Command {
 			sort.Slice(rows, func(i, j int) bool { return rows[i].Name < rows[j].Name })
 
 			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(rows); err != nil {
+				if err := console.JSON(rows); err != nil {
 					return err
 				}
 			} else {

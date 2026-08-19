@@ -29,6 +29,6 @@ func main() {
 		console.Error(err, hintFor(err))
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, "Error:", err)
-	os.Exit(2) // cobra usage error: flags/args never validated
+	fmt.Fprintln(os.Stderr, "Error:", err) //nolint:forbidigo // usage errors fail before the console exists
+	os.Exit(2)                             // cobra usage error: flags/args never validated
 }

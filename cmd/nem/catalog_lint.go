@@ -1,8 +1,6 @@
 package main
 
 import (
-	"fmt"
-
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/publish"
@@ -24,11 +22,11 @@ func newCatalogLintCmd() *cobra.Command {
 			}
 			if len(findings) > 0 {
 				for _, f := range findings {
-					fmt.Fprintln(cmd.ErrOrStderr(), f.String())
+					console.Warn("%s", f.String())
 				}
 				return &ExitError{Code: 1}
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "catalog is clean: no findings")
+			console.Success("Catalog is clean: no findings")
 			return nil
 		},
 	}

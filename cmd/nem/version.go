@@ -22,8 +22,8 @@ func newVersionCmd() *cobra.Command {
 		Short: "Print the version of nem",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := fmt.Fprint(cmd.OutOrStdout(), versionInfo())
-			return err
+			console.Data("%s", versionInfo())
+			return nil
 		},
 	}
 }

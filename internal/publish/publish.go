@@ -112,7 +112,7 @@ func Publish(ctx context.Context, dir, ref string, opts Options, r report.Report
 		return fmt.Errorf("push catalog index: %w", err)
 	}
 
-	r.Info("published %s: %d pushed, %d unchanged, tags %s", ref, pushed, skipped, strings.Join(tags, ", "))
+	r.Info("Published %s: %d pushed, %d unchanged, tags %s", ref, pushed, skipped, strings.Join(tags, ", "))
 	return nil
 }
 
@@ -141,11 +141,11 @@ func lintError(findings []Finding) error {
 // touches the target, so it cannot report skip-vs-push per package —
 // that decision depends on what the target already holds.
 func reportPlan(r report.Reporter, ref string, entries []pkgEntry, tags []string) {
-	r.Info("dry run: publish %s (%d packages)", ref, len(entries))
+	r.Info("Dry run: publish %s (%d packages)", ref, len(entries))
 	for _, e := range entries {
 		r.Info("  %s %s", e.Name, e.Version)
 	}
-	r.Info("tags: %s", strings.Join(tags, ", "))
+	r.Info("Tags: %s", strings.Join(tags, ", "))
 }
 
 // enumerate walks dir the same way Lint does — pkgs/<name>/pkg.yaml under
@@ -256,7 +256,7 @@ func pushOne(ctx context.Context, target oras.Target, e pkgEntry, force bool, r 
 			return ocix.IndexEntry{}, false, fmt.Errorf("check %s: %w", e.Name, err)
 		}
 		if exists {
-			r.Info("skip %s %s (unchanged)", e.Name, e.Version)
+			r.Info("Skip %s %s (unchanged)", e.Name, e.Version)
 			return indexEntry(e, desc), false, nil
 		}
 	}
@@ -265,7 +265,7 @@ func pushOne(ctx context.Context, target oras.Target, e pkgEntry, force bool, r 
 	if err != nil {
 		return ocix.IndexEntry{}, false, fmt.Errorf("push %s: %w", e.Name, err)
 	}
-	r.Info("push %s %s", e.Name, e.Version)
+	r.Info("Push %s %s", e.Name, e.Version)
 	return indexEntry(e, pushed), true, nil
 }
 

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -101,9 +100,7 @@ func newCatalogMissingCmd() *cobra.Command {
 						grouped[plat.String()] = append(grouped[plat.String()], missingRow{e.name, e.version})
 					}
 				}
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				enc.SetIndent("", "  ")
-				if err := enc.Encode(grouped); err != nil {
+				if err := console.JSON(grouped); err != nil {
 					return err
 				}
 			} else if len(entries) > 0 {

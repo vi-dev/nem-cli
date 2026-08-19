@@ -3,7 +3,14 @@ version: "2"
 linters:
   enable:
     - unparam
+    - forbidigo
   settings:
+    forbidigo:
+      forbid:
+        - pattern: ^fmt\.F?[Pp]rint(f|ln)?$
+          msg: terminal output goes through report.Console (narration to stderr, Data/JSON/Table to stdout)
+        - pattern: ^print(ln)?$
+          msg: the print builtins bypass report.Console
     errcheck:
       exclude-functions:
         - (io.Closer).Close
@@ -22,8 +29,15 @@ linters:
       - path: _test\.go$
         linters:
           - errcheck
+          # Test doubles print to their own writers, not the terminal.
+          - forbidigo
           # Test helpers legitimately take arguments that never vary.
           - unparam
+      # fmt printing is only banned where a report.Console exists to replace
+      # it; elsewhere fmt.Fprintf into builders and buffers is idiomatic.
+      - path-except: ^cmd/nem/
+        linters:
+          - forbidigo
 
 formatters:
   enable:
