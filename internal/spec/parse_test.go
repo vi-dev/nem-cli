@@ -252,3 +252,33 @@ versions: [v1.0.0]
 		t.Fatalf("want error naming the bad kind, got %v", err)
 	}
 }
+
+func TestParseBuildNormalize(t *testing.T) {
+	src := `
+schema: 2
+name: x
+artifact: {oci: ":{{.Version}}"}
+install:
+  - extract: {}
+build:
+  source: {url: "https://example.com/src.tar.gz"}
+  steps:
+    - run: make
+  output: out
+versions: [v1.0.0]
+`
+	p, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Build.Normalize != nil {
+		t.Fatalf("absent normalize must parse to nil, got %v", *p.Build.Normalize)
+	}
+	p, err = Parse([]byte(strings.Replace(src, "  output: out", "  output: out\n  normalize: false", 1)))
+	if err != nil {
+		t.Fatalf("Parse with normalize: %v", err)
+	}
+	if p.Build.Normalize == nil || *p.Build.Normalize {
+		t.Fatalf("normalize: false must parse to *false, got %v", p.Build.Normalize)
+	}
+}

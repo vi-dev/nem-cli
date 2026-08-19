@@ -59,7 +59,8 @@ type rawBuild struct {
 		Run       string   `yaml:"run"`
 		Platforms []string `yaml:"platforms"`
 	} `yaml:"steps"`
-	Output string `yaml:"output"`
+	Output    string `yaml:"output"`
+	Normalize *bool  `yaml:"normalize"`
 }
 
 type rawVersionEntry struct {
@@ -113,7 +114,7 @@ func Parse(data []byte) (*Package, error) {
 		p.Env = append(p.Env, EnvExport{Name: e.Name, Value: e.Value, Platforms: plats})
 	}
 	if raw.Build != nil {
-		b := &Build{Output: raw.Build.Output}
+		b := &Build{Output: raw.Build.Output, Normalize: raw.Build.Normalize}
 		b.Source.URL = raw.Build.Source.URL
 		for i, d := range raw.Build.Deps {
 			dep, err := shapeDep(d)

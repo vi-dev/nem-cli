@@ -122,6 +122,12 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, fmt.Errorf("no build step applies to %s", spec.Current())
 	}
 
+	if n := pkg.Build.Normalize; n == nil || *n {
+		if err := normalizeOutput(outputDir); err != nil {
+			return Result{}, fmt.Errorf("normalize output: %w", err)
+		}
+	}
+
 	final, err := harvest(outputDir, opts.Output)
 	if err != nil {
 		return Result{}, err

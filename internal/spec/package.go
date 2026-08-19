@@ -97,10 +97,11 @@ type EnvExport struct {
 // Build describes how to build a package from source when no prebuilt
 // artifact is available.
 type Build struct {
-	Deps   []Dep
-	Source struct{ URL string }
-	Steps  []BuildStep
-	Output string
+	Deps      []Dep
+	Source    struct{ URL string }
+	Steps     []BuildStep
+	Output    string
+	Normalize *bool // nil = true: run the standard output normalization
 }
 
 // BuildStep is one shell command of a source build, optionally
