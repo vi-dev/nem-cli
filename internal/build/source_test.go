@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ulikunitz/xz"
+
 	"github.com/vi-dev/nem-cli/internal/fetch"
 )
 
@@ -235,6 +237,61 @@ func TestUnpackSourceBzip2(t *testing.T) {
 	arc := filepath.Join(t.TempDir(), "s.tar.bz2")
 	if err := os.WriteFile(arc, raw, 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
+	}
+	root, err := unpackSource(arc, t.TempDir())
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if filepath.Base(root) != "src-1.0" {
+		t.Fatalf("root = %q, want basename src-1.0", root)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "configure"))
+	if err != nil {
+		t.Fatalf("read configure: %v", err)
+	}
+	if string(got) != "#!/bin/sh\n" {
+		t.Fatalf("configure content = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, "main.c")); err != nil {
+		t.Fatalf("expected main.c at stripped root: %v", err)
+	}
+}
+
+func makeTarXz(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	xw, err := xz.NewWriter(&buf)
+	if err != nil {
+		t.Fatalf("xz writer: %v", err)
+	}
+	tw := tar.NewWriter(xw)
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(content)),
+		}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatalf("write tar header %s: %v", name, err)
+		}
+		if _, err := tw.Write([]byte(content)); err != nil {
+			t.Fatalf("write tar content %s: %v", name, err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	if err := xw.Close(); err != nil {
+		t.Fatalf("close xz writer: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestUnpackSourceXz(t *testing.T) {
+	txz := makeTarXz(t, map[string]string{"src-1.0/configure": "#!/bin/sh\n", "src-1.0/main.c": "x"})
+	arc := filepath.Join(t.TempDir(), "s.tar.xz")
+	if err := os.WriteFile(arc, txz, 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
 	}
 	root, err := unpackSource(arc, t.TempDir())
 	if err != nil {

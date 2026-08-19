@@ -3,6 +3,7 @@ package build
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
@@ -13,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/ulikunitz/xz"
 
 	"github.com/vi-dev/nem-cli/internal/fetch"
 )
@@ -38,8 +41,8 @@ func fetchSource(ctx context.Context, client *http.Client, url, wantSHA256, dir 
 	return path, sum, false, nil
 }
 
-// unpackSource extracts archivePath, a gzip- or bzip2-compressed tar, into
-// destDir. Every entry is written at its full archive path (no path
+// unpackSource extracts archivePath, a gzip-, bzip2-, or xz-compressed tar,
+// into destDir. Every entry is written at its full archive path (no path
 // components are dropped), so when the archive holds one common leading
 // directory (the usual "name-version/" shape of a source release), that
 // directory ends up directly under destDir, and root reports its path. When
@@ -137,25 +140,38 @@ func unpackSource(archivePath, destDir string) (root string, err error) {
 }
 
 // decompressStream wraps r in the decompressor matching its leading magic
-// bytes: gzip (1f 8b) or bzip2 ("BZh"). Source releases ship as one or the
-// other; anything else is rejected rather than fed to tar as-is.
+// bytes: gzip (1f 8b), bzip2 ("BZh"), or xz (fd 37 7a 58 5a 00). Source
+// releases ship as one of these; anything else is rejected rather than fed
+// to tar as-is.
 func decompressStream(r io.Reader) (io.Reader, error) {
+	gzipMagic := []byte{0x1f, 0x8b}
+	bzip2Magic := []byte("BZh")
+	xzMagic := []byte{0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00}
+
 	br := bufio.NewReader(r)
-	magic, err := br.Peek(3)
-	if err != nil {
+	// A stream shorter than the longest magic can't be a valid archive;
+	// tolerate the short peek and let the default branch reject it.
+	magic, err := br.Peek(len(xzMagic))
+	if err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("read archive header: %w", err)
 	}
 	switch {
-	case magic[0] == 0x1f && magic[1] == 0x8b:
+	case bytes.HasPrefix(magic, gzipMagic):
 		gr, err := gzip.NewReader(br)
 		if err != nil {
 			return nil, fmt.Errorf("open gzip stream: %w", err)
 		}
 		return gr, nil
-	case magic[0] == 'B' && magic[1] == 'Z' && magic[2] == 'h':
+	case bytes.HasPrefix(magic, bzip2Magic):
 		return bzip2.NewReader(br), nil
+	case bytes.HasPrefix(magic, xzMagic):
+		xr, err := xz.NewReader(br)
+		if err != nil {
+			return nil, fmt.Errorf("open xz stream: %w", err)
+		}
+		return xr, nil
 	default:
-		return nil, fmt.Errorf("unsupported source compression (magic %x); want gzip or bzip2", magic)
+		return nil, fmt.Errorf("unsupported source compression (magic %x); want gzip, bzip2, or xz", magic)
 	}
 }
 
