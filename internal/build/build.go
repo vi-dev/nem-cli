@@ -101,7 +101,11 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		Version: version, Platform: spec.Current(), Prefix: prefix, StagingDir: staging, OutputDir: outputDir,
 	})
 
+	ran := 0
 	for i, step := range pkg.Build.Steps {
+		if !spec.PlatformsInclude(step.Platforms, spec.Current()) {
+			continue
+		}
 		c := exec.CommandContext(ctx, "sh", "-c", step.Run)
 		c.Dir = srcRoot
 		c.Env = env
@@ -110,6 +114,12 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		if err := c.Run(); err != nil {
 			return Result{}, fmt.Errorf("build step %d (%q): %w", i+1, step.Run, err)
 		}
+		ran++
+	}
+	// Falling through with zero steps run would harvest — and possibly
+	// publish — the unbuilt source tree as this platform's build.
+	if ran == 0 {
+		return Result{}, fmt.Errorf("no build step applies to %s", spec.Current())
 	}
 
 	final, err := harvest(outputDir, opts.Output)

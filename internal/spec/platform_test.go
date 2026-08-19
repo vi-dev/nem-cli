@@ -42,6 +42,22 @@ func TestPlatformMatches(t *testing.T) {
 	}
 }
 
+func TestPlatformsInclude(t *testing.T) {
+	target := Platform{OS: "linux", Arch: "amd64"}
+	if !PlatformsInclude(nil, target) {
+		t.Error("empty list should include every platform")
+	}
+	if !PlatformsInclude([]Platform{{OS: "darwin"}, {OS: "linux"}}, target) {
+		t.Error("os-only constraint should cover linux/amd64")
+	}
+	if !PlatformsInclude([]Platform{{OS: "linux", Arch: "amd64"}}, target) {
+		t.Error("exact constraint should cover linux/amd64")
+	}
+	if PlatformsInclude([]Platform{{OS: "darwin"}, {OS: "linux", Arch: "arm64"}}, target) {
+		t.Error("disjoint constraints should not cover linux/amd64")
+	}
+}
+
 func TestSupported(t *testing.T) {
 	if len(Supported) != 4 {
 		t.Fatalf("want 4 supported platforms, got %d", len(Supported))

@@ -33,6 +33,20 @@ func (p Platform) Matches(full Platform) bool {
 // Current returns the running platform.
 func Current() Platform { return Platform{OS: runtime.GOOS, Arch: runtime.GOARCH} }
 
+// PlatformsInclude reports whether a platform constraint list (empty =
+// unconstrained) covers p.
+func PlatformsInclude(list []Platform, p Platform) bool {
+	if len(list) == 0 {
+		return true
+	}
+	for _, c := range list {
+		if c.Matches(p) {
+			return true
+		}
+	}
+	return false
+}
+
 // ParsePlatform parses "os/arch" or a bare "os" constraint, restricted to
 // the supported matrix.
 func ParsePlatform(s string) (Platform, error) {

@@ -248,7 +248,7 @@ func applyPackageExports(entries []resolvedEntry, vars, sources map[string]strin
 	current := spec.Current()
 	for _, r := range entries {
 		for _, export := range r.meta.Env {
-			if !platformIncludes(export.Platforms, current) {
+			if !spec.PlatformsInclude(export.Platforms, current) {
 				continue
 			}
 			if IsReserved(export.Name) {
@@ -264,20 +264,6 @@ func applyPackageExports(entries []resolvedEntry, vars, sources map[string]strin
 			sources[export.Name] = r.name
 		}
 	}
-}
-
-// platformIncludes reports whether a package export's platform constraint
-// (empty = unconstrained) covers current.
-func platformIncludes(constraints []spec.Platform, current spec.Platform) bool {
-	if len(constraints) == 0 {
-		return true
-	}
-	for _, c := range constraints {
-		if c.Matches(current) {
-			return true
-		}
-	}
-	return false
 }
 
 // envTemplateCtx is the template context for a package env export's raw

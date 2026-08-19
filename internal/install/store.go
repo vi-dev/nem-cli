@@ -71,7 +71,7 @@ func Install(ctx context.Context, h home.Home, pkg *spec.Package, version, catal
 		}
 	}()
 
-	if err := RunActions(pkg, staging, artifactPath); err != nil {
+	if err := RunActions(pkg, staging, artifactPath, spec.Current()); err != nil {
 		return fmt.Errorf("install %s@%s: %w", pkg.Name, version, err)
 	}
 	if err := writeMeta(staging, pkg, version, catalog); err != nil {

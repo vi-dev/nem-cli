@@ -150,7 +150,7 @@ func TestValidateBuildSection(t *testing.T) {
 			Build:    b,
 		}
 	}
-	good := &Build{Output: "dist", Steps: []struct{ Run string }{{Run: "make"}}}
+	good := &Build{Output: "dist", Steps: []BuildStep{{Run: "make"}}}
 	good.Source.URL = "https://ex/{{.Version}}.tgz"
 	good.Deps = []Dep{{Name: "openssl", Kind: DepKindLink, Compat: "3"}}
 	if err := base(good).Validate(); err != nil {
@@ -160,13 +160,13 @@ func TestValidateBuildSection(t *testing.T) {
 		"empty source":        func(b *Build) { b.Source.URL = "" },
 		"empty output":        func(b *Build) { b.Output = "" },
 		"no steps":            func(b *Build) { b.Steps = nil },
-		"empty run":           func(b *Build) { b.Steps = []struct{ Run string }{{Run: ""}} },
+		"empty run":           func(b *Build) { b.Steps = []BuildStep{{Run: ""}} },
 		"compat no link":      func(b *Build) { b.Deps = []Dep{{Name: "x", Compat: "3"}} },
 		"unrenderable source": func(b *Build) { b.Source.URL = "{{.Bogus}}" },
 		"bad dep name":        func(b *Build) { b.Deps = []Dep{{Name: "Bad", Kind: DepKindLink}} },
 		"bad compat format":   func(b *Build) { b.Deps = []Dep{{Name: "x", Kind: DepKindLink, Compat: "abc"}} },
 	} {
-		b := &Build{Output: "dist", Deps: good.Deps, Steps: []struct{ Run string }{{Run: "make"}}}
+		b := &Build{Output: "dist", Deps: good.Deps, Steps: []BuildStep{{Run: "make"}}}
 		b.Source.URL = "https://ex/{{.Version}}.tgz"
 		mut(b)
 		if err := base(b).Validate(); err == nil {

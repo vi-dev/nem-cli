@@ -56,7 +56,8 @@ type rawBuild struct {
 		URL string `yaml:"url"`
 	} `yaml:"source"`
 	Steps []struct {
-		Run string `yaml:"run"`
+		Run       string   `yaml:"run"`
+		Platforms []string `yaml:"platforms"`
 	} `yaml:"steps"`
 	Output string `yaml:"output"`
 }
@@ -121,8 +122,12 @@ func Parse(data []byte) (*Package, error) {
 			}
 			b.Deps = append(b.Deps, dep)
 		}
-		for _, s := range raw.Build.Steps {
-			b.Steps = append(b.Steps, struct{ Run string }{Run: s.Run})
+		for i, s := range raw.Build.Steps {
+			plats, err := parsePlatforms(s.Platforms)
+			if err != nil {
+				return nil, fmt.Errorf("build.steps[%d]: %w", i, err)
+			}
+			b.Steps = append(b.Steps, BuildStep{Run: s.Run, Platforms: plats})
 		}
 		p.Build = b
 	}
@@ -193,8 +198,20 @@ func parseDepKind(s string) (DepKind, error) {
 }
 
 func shapeAction(m map[string]yaml.RawMessage) (Action, error) {
+	var plats []Platform
+	if raw, ok := m["platforms"]; ok {
+		var ss []string
+		if err := yaml.Unmarshal(raw, &ss); err != nil {
+			return Action{}, fmt.Errorf("platforms: %w", err)
+		}
+		var err error
+		if plats, err = parsePlatforms(ss); err != nil {
+			return Action{}, err
+		}
+		delete(m, "platforms")
+	}
 	if len(m) != 1 {
-		return Action{}, fmt.Errorf("action must have exactly one key")
+		return Action{}, fmt.Errorf("action must have exactly one action key")
 	}
 	for key, val := range m {
 		switch key {
@@ -203,25 +220,25 @@ func shapeAction(m map[string]yaml.RawMessage) (Action, error) {
 			if err := yaml.UnmarshalWithOptions(val, &e, yaml.Strict()); err != nil {
 				return Action{}, fmt.Errorf("extract: %w", err)
 			}
-			return Action{Extract: &e}, nil
+			return Action{Extract: &e, Platforms: plats}, nil
 		case "copy":
 			var c CopyAction
 			if err := yaml.UnmarshalWithOptions(val, &c, yaml.Strict()); err != nil {
 				return Action{}, fmt.Errorf("copy: %w", err)
 			}
-			return Action{Copy: &c}, nil
+			return Action{Copy: &c, Platforms: plats}, nil
 		case "move":
 			var mv MoveAction
 			if err := yaml.UnmarshalWithOptions(val, &mv, yaml.Strict()); err != nil {
 				return Action{}, fmt.Errorf("move: %w", err)
 			}
-			return Action{Move: &mv}, nil
+			return Action{Move: &mv, Platforms: plats}, nil
 		case "mkdir":
 			var dir string
 			if err := yaml.Unmarshal(val, &dir); err != nil {
 				return Action{}, fmt.Errorf("mkdir: %w", err)
 			}
-			return Action{Mkdir: dir}, nil
+			return Action{Mkdir: dir, Platforms: plats}, nil
 		default:
 			return Action{}, fmt.Errorf("unknown action %q", key)
 		}

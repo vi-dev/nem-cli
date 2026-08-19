@@ -265,7 +265,7 @@ func walk(ctx context.Context, sources []catalog.Named, name, version, catName, 
 // walkDeps reconciles and (first-wins) recurses into pkg's deps for platform.
 func walkDeps(ctx context.Context, sources []catalog.Named, pkg *spec.Package, platform spec.Platform, visited map[string]bool, accs map[string]*acc) error {
 	for _, dep := range pkg.Deps {
-		if !depIncludes(dep, platform) {
+		if !spec.PlatformsInclude(dep.Platforms, platform) {
 			continue
 		}
 		depPkg, depCat, depDig, err := catalog.Lookup(ctx, sources, project.ToolKey{Name: dep.Name})
@@ -388,20 +388,6 @@ func reconcile(accs map[string]*acc, name, version, compat string, floating bool
 func supports(pkg *spec.Package, platform spec.Platform) bool {
 	for _, p := range pkg.SupportedBy() {
 		if p == platform {
-			return true
-		}
-	}
-	return false
-}
-
-// depIncludes reports whether a dep edge's platform constraint (empty =
-// unconstrained) covers platform.
-func depIncludes(dep spec.Dep, platform spec.Platform) bool {
-	if len(dep.Platforms) == 0 {
-		return true
-	}
-	for _, c := range dep.Platforms {
-		if c.Matches(platform) {
 			return true
 		}
 	}

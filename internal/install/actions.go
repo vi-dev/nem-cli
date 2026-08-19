@@ -17,9 +17,9 @@ import (
 // downloaded artifact rather than a path inside staging.
 const artifactToken = "{{.Artifact}}"
 
-// RunActions executes pkg.Install in order inside stagingDir.
-// artifactPath is the verified downloaded artifact ({{.Artifact}} in copy
-// src).
+// RunActions executes pkg.Install in order inside stagingDir, skipping
+// actions whose platform constraint excludes platform. artifactPath is
+// the verified downloaded artifact ({{.Artifact}} in copy src).
 //
 // Every filesystem mutation goes through an os.Root rooted at stagingDir:
 // a purely lexical containment check on an action's own path (or a
@@ -28,17 +28,28 @@ const artifactToken = "{{.Artifact}}"
 // really resolve outside staging once the OS follows it. os.Root refuses
 // any traversal that would leave the root regardless of how many symlink
 // hops are involved.
-func RunActions(pkg *spec.Package, stagingDir, artifactPath string) error {
+func RunActions(pkg *spec.Package, stagingDir, artifactPath string, platform spec.Platform) error {
 	root, err := os.OpenRoot(stagingDir)
 	if err != nil {
 		return fmt.Errorf("open staging dir: %w", err)
 	}
 	defer root.Close()
 
+	ran := 0
 	for i, a := range pkg.Install {
+		if !spec.PlatformsInclude(a.Platforms, platform) {
+			continue
+		}
 		if err := runAction(a, root, artifactPath); err != nil {
 			return fmt.Errorf("install[%d]: %w", i, err)
 		}
+		ran++
+	}
+	// A manifest is validated to have install actions; ending up with none
+	// after platform filtering would otherwise commit an empty install as
+	// success.
+	if ran == 0 {
+		return fmt.Errorf("no install action applies to %s", platform)
 	}
 	return nil
 }

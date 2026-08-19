@@ -126,6 +126,86 @@ func TestParseRejectsUnknownNestedFields(t *testing.T) {
 	}
 }
 
+func TestParseActionPlatforms(t *testing.T) {
+	p, err := Parse([]byte(`
+schema: 2
+name: x
+artifact: {oci: ":{{.Version}}"}
+install:
+  - extract: {strip: 1}
+    platforms: [linux]
+  - copy: {src: a, dst: b}
+    platforms: [darwin/arm64]
+  - mkdir: cache
+    platforms: [linux/amd64, darwin]
+  - move: {src: a, dst: b}
+versions: [v1.0.0]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(p.Install[0].Platforms) != 1 || p.Install[0].Platforms[0] != (Platform{OS: "linux"}) {
+		t.Fatalf("extract platforms: %+v", p.Install[0].Platforms)
+	}
+	if len(p.Install[1].Platforms) != 1 || p.Install[1].Platforms[0] != (Platform{OS: "darwin", Arch: "arm64"}) {
+		t.Fatalf("copy platforms: %+v", p.Install[1].Platforms)
+	}
+	if len(p.Install[2].Platforms) != 2 || p.Install[2].Mkdir != "cache" {
+		t.Fatalf("mkdir action: %+v", p.Install[2])
+	}
+	if p.Install[3].Platforms != nil {
+		t.Fatalf("unconstrained action platforms: %+v", p.Install[3].Platforms)
+	}
+}
+
+func TestParseRejectsUnsupportedActionPlatform(t *testing.T) {
+	y := "schema: 2\nname: x\nartifact: {oci: \":{{.Version}}\"}\ninstall:\n  - extract: {}\n    platforms: [windows]\nversions: [v1.0.0]\n"
+	if _, err := Parse([]byte(y)); err == nil || !strings.Contains(err.Error(), "windows") {
+		t.Fatalf("want unsupported-platform error, got %v", err)
+	}
+}
+
+func TestParseRejectsActionKeyCount(t *testing.T) {
+	onlyPlatforms := "schema: 2\nname: x\nartifact: {oci: \":{{.Version}}\"}\ninstall:\n  - platforms: [linux]\nversions: [v1.0.0]\n"
+	if _, err := Parse([]byte(onlyPlatforms)); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("platforms without action: got %v", err)
+	}
+	twoActions := "schema: 2\nname: x\nartifact: {oci: \":{{.Version}}\"}\ninstall:\n  - extract: {}\n    mkdir: cache\n    platforms: [linux]\nversions: [v1.0.0]\n"
+	if _, err := Parse([]byte(twoActions)); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("two action keys: got %v", err)
+	}
+}
+
+func TestParseBuildStepPlatforms(t *testing.T) {
+	p, err := Parse([]byte(`
+schema: 2
+name: x
+artifact: {oci: ":{{.Version}}"}
+install:
+  - extract: {}
+build:
+  source: {url: "https://example.com/src.tar.gz"}
+  steps:
+    - run: make
+      platforms: [linux]
+    - run: make install
+  output: out
+versions: [v1.0.0]
+`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(p.Build.Steps) != 2 {
+		t.Fatalf("steps: %+v", p.Build.Steps)
+	}
+	if len(p.Build.Steps[0].Platforms) != 1 || p.Build.Steps[0].Platforms[0] != (Platform{OS: "linux"}) {
+		t.Fatalf("step platforms: %+v", p.Build.Steps[0])
+	}
+	if p.Build.Steps[1].Run != "make install" || p.Build.Steps[1].Platforms != nil {
+		t.Fatalf("unconstrained step: %+v", p.Build.Steps[1])
+	}
+}
+
 func TestParseLibsKindAndCompat(t *testing.T) {
 	pkg, err := Parse([]byte(`
 schema: 2

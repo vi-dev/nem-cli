@@ -64,13 +64,14 @@ type Artifact struct {
 // GitHubAsset locates a release asset within a GitHub repo.
 type GitHubAsset struct{ Repo, Asset string }
 
-// Action is one step of a package's install sequence. Exactly one field
-// is set.
+// Action is one step of a package's install sequence, optionally
+// platform-constrained. Exactly one action field is set.
 type Action struct {
-	Extract *ExtractAction
-	Copy    *CopyAction
-	Move    *MoveAction
-	Mkdir   string
+	Extract   *ExtractAction
+	Copy      *CopyAction
+	Move      *MoveAction
+	Mkdir     string
+	Platforms []Platform
 }
 
 // ExtractAction extracts a downloaded archive, stripping Strip leading
@@ -98,6 +99,13 @@ type EnvExport struct {
 type Build struct {
 	Deps   []Dep
 	Source struct{ URL string }
-	Steps  []struct{ Run string }
+	Steps  []BuildStep
 	Output string
+}
+
+// BuildStep is one shell command of a source build, optionally
+// platform-constrained.
+type BuildStep struct {
+	Run       string
+	Platforms []Platform
 }
