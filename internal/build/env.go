@@ -29,16 +29,18 @@ type buildContext struct {
 }
 
 // composeBuildEnv overlays the build scaffold onto base (the author's own
-// environment): run-dep bins prepended to PATH, and for each library dep the
-// build-time include/lib/pkgconfig flags plus a computed relative rpath.
+// environment): run-dep bins prepended to PATH, each dep's prefix as
+// NEM_DEP_<NAME>_PREFIX, and each library dep's include/lib/pkgconfig flags —
+// make-escaped in CPPFLAGS/CFLAGS/LDFLAGS, exec-safe in CGO_CFLAGS/CGO_LDFLAGS.
 // Existing values are appended to, never clobbered.
 func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []string {
 	vars := envToMap(base)
 
 	var pathDirs []string
-	var cppflags, cflags, ldflags, pkgcfg []string
+	var cppflags, cflags, ldflags, cgoLdflags, pkgcfg []string
 	newDTags := false
 	for _, d := range deps {
+		vars[depPrefixVar(d.Name)] = d.Prefix
 		if d.OnPath {
 			for _, b := range d.Bins {
 				pathDirs = append(pathDirs, filepath.Join(d.Prefix, b))
@@ -55,21 +57,31 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 			libs = []string{"lib"}
 		}
 		for _, lib := range libs {
-			ldflags = append(ldflags, "-L"+filepath.Join(d.Prefix, lib))
-			ldflags = append(ldflags, rpathFlag(d.Name, d.Version, lib))
+			dir := filepath.Join(d.Prefix, lib)
+			ldflags = append(ldflags, "-L"+dir)
+			cgoLdflags = append(cgoLdflags, "-L"+dir)
 			if runtime.GOOS == "linux" {
+				// GNU ld finds a shared library's own NEEDED entries via
+				// -rpath-link, not -L or the post-install $ORIGIN rpath
+				ldflags = append(ldflags, "-Wl,-rpath-link,"+dir)
+				cgoLdflags = append(cgoLdflags, "-Wl,-rpath-link,"+dir)
 				newDTags = true
 			}
+			ldflags = append(ldflags, rpathFlag(d.Name, d.Version, lib))
+			cgoLdflags = append(cgoLdflags, cgoRpathFlag(d.Name, d.Version, lib))
 		}
 	}
 	if newDTags {
 		ldflags = append(ldflags, "-Wl,--enable-new-dtags")
+		cgoLdflags = append(cgoLdflags, "-Wl,--enable-new-dtags")
 	}
 
 	prependPathVar(vars, "PATH", pathDirs)
 	appendVar(vars, "CPPFLAGS", cppflags, " ")
 	appendVar(vars, "CFLAGS", cflags, " ")
 	appendVar(vars, "LDFLAGS", ldflags, " ")
+	appendVar(vars, "CGO_CFLAGS", cflags, " ")
+	appendVar(vars, "CGO_LDFLAGS", cgoLdflags, " ")
 	appendVar(vars, "PKG_CONFIG_PATH", pkgcfg, string(filepath.ListSeparator))
 
 	vars["NEM_VERSION"] = bctx.Version
@@ -93,11 +105,41 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 // it is single-quoted. Both together yield the intended $ORIGIN. macOS uses
 // @loader_path, which has no $ and needs neither.
 func rpathFlag(dep, version, lib string) string {
-	rel := "/../../../" + dep + "/" + version + "/" + lib
+	rel := rpathRel(dep, version, lib)
 	if runtime.GOOS == "linux" {
 		return "-Wl,-rpath,'$$ORIGIN" + rel + "'"
 	}
 	return "-Wl,-rpath,@loader_path" + rel
+}
+
+// cgoRpathFlag is rpathFlag for the CGO_* variables: cgo passes flags with
+// no make or shell in between, so no doubling or quoting.
+func cgoRpathFlag(dep, version, lib string) string {
+	rel := rpathRel(dep, version, lib)
+	if runtime.GOOS == "linux" {
+		return "-Wl,-rpath,$ORIGIN" + rel
+	}
+	return "-Wl,-rpath,@loader_path" + rel
+}
+
+func rpathRel(dep, version, lib string) string {
+	return "/../../../" + dep + "/" + version + "/" + lib
+}
+
+// depPrefixVar names the env var carrying a dependency's install prefix,
+// e.g. libgpg-error -> NEM_DEP_LIBGPG_ERROR_PREFIX.
+func depPrefixVar(name string) string {
+	mangled := strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z':
+			return r - ('a' - 'A')
+		case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			return r
+		default:
+			return '_'
+		}
+	}, name)
+	return "NEM_DEP_" + mangled + "_PREFIX"
 }
 
 func envToMap(env []string) map[string]string {

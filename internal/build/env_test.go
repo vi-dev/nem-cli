@@ -22,12 +22,13 @@ func TestComposeBuildEnv(t *testing.T) {
 	deps := []resolvedDep{
 		{Name: "make", Version: "v4", Prefix: "/nh/packages/make/v4", OnPath: true, Bins: []string{"bin"}},
 		{Name: "openssl", Version: "v3.4.0", Prefix: "/nh/packages/openssl/v3.4.0", OnLoaderPath: true, Libs: []string{"lib"}},
+		{Name: "libgpg-error", Version: "1.51", Prefix: "/nh/packages/libgpg-error/1.51", OnLoaderPath: true},
 	}
 	bctx := buildContext{
 		Version: "v1.2.3", Platform: spec.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 		Prefix: "/nh/packages/tool/v1.2.3", StagingDir: "/tmp/stg", OutputDir: "/tmp/stg/dist",
 	}
-	env := composeBuildEnv([]string{"PATH=/usr/bin", "CPPFLAGS=-DBASE"}, deps, bctx)
+	env := composeBuildEnv([]string{"PATH=/usr/bin", "CPPFLAGS=-DBASE", "CGO_LDFLAGS=-lbase"}, deps, bctx)
 	m := envMap(env)
 
 	if !strings.HasPrefix(m["PATH"], "/nh/packages/make/v4/bin:") {
@@ -50,9 +51,43 @@ func TestComposeBuildEnv(t *testing.T) {
 	if !strings.Contains(m["LDFLAGS"], wantRpath) {
 		t.Fatalf("LDFLAGS rpath = %q, want %s", m["LDFLAGS"], wantRpath)
 	}
+	rpathLink := "-Wl,-rpath-link,/nh/packages/openssl/v3.4.0/lib"
+	if runtime.GOOS == "linux" && !strings.Contains(m["LDFLAGS"], rpathLink) {
+		t.Fatalf("linux LDFLAGS must carry -rpath-link: %q", m["LDFLAGS"])
+	}
+	if runtime.GOOS != "linux" && strings.Contains(m["LDFLAGS"], "-rpath-link") {
+		t.Fatalf("-rpath-link is GNU ld only: %q", m["LDFLAGS"])
+	}
+	if !strings.Contains(m["CGO_CFLAGS"], "-I/nh/packages/openssl/v3.4.0/include") {
+		t.Fatalf("CGO_CFLAGS: %q", m["CGO_CFLAGS"])
+	}
+	wantCgoRpath := "-Wl,-rpath,@loader_path/../../../openssl/v3.4.0/lib"
+	if runtime.GOOS == "linux" {
+		wantCgoRpath = "-Wl,-rpath,$ORIGIN/../../../openssl/v3.4.0/lib"
+	}
+	// cgo passes flags with no make or shell in between: single dollar, no quotes
+	switch {
+	case !strings.Contains(m["CGO_LDFLAGS"], "-lbase"):
+		t.Fatalf("CGO_LDFLAGS must append to base: %q", m["CGO_LDFLAGS"])
+	case !strings.Contains(m["CGO_LDFLAGS"], "-L/nh/packages/openssl/v3.4.0/lib"):
+		t.Fatalf("CGO_LDFLAGS -L: %q", m["CGO_LDFLAGS"])
+	case !strings.Contains(m["CGO_LDFLAGS"], wantCgoRpath),
+		strings.Contains(m["CGO_LDFLAGS"], "$$"),
+		strings.Contains(m["CGO_LDFLAGS"], "'"):
+		t.Fatalf("CGO_LDFLAGS rpath = %q, want %s", m["CGO_LDFLAGS"], wantCgoRpath)
+	}
 	for k, want := range map[string]string{
 		"NEM_VERSION": "v1.2.3", "NEM_PREFIX": "/nh/packages/tool/v1.2.3",
 		"NEM_STAGING_DIR": "/tmp/stg", "NEM_OUTPUT": "/tmp/stg/dist",
+	} {
+		if m[k] != want {
+			t.Errorf("%s = %q, want %q", k, m[k], want)
+		}
+	}
+	for k, want := range map[string]string{
+		"NEM_DEP_MAKE_PREFIX":         "/nh/packages/make/v4",
+		"NEM_DEP_OPENSSL_PREFIX":      "/nh/packages/openssl/v3.4.0",
+		"NEM_DEP_LIBGPG_ERROR_PREFIX": "/nh/packages/libgpg-error/1.51",
 	} {
 		if m[k] != want {
 			t.Errorf("%s = %q, want %q", k, m[k], want)
