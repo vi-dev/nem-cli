@@ -60,7 +60,7 @@ func newRoot() *cobra.Command {
 	//  - a subcommand defining its own PersistentPreRunE REPLACES this root
 	//    hook — console/nemHome would stay nil. Don't do that.
 	root.AddCommand(newVersionCmd(), newStatusCmd(), newCatalogCmd(), newUseCmd(), newUnuseCmd(), newLockCmd(), newSyncCmd(),
-		newEnvCmd(), newActivateCmd(), newDeactivateCmd(), newExecCmd(), newWhichCmd(), newSearchCmd())
+		newEnvCmd(), newActivateCmd(), newDeactivateCmd(), newExecCmd(), newWhichCmd(), newSearchCmd(), newInfoCmd())
 	return root
 }
 
