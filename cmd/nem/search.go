@@ -13,11 +13,16 @@ import (
 
 func newSearchCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "search <query>",
+		Use:   "search [query]",
 		Short: "Search catalogs for packages",
-		Args:  cobra.ExactArgs(1),
+		Long:  "Search catalogs for packages by name or description.\nWithout a query, list every available package.",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSearch(cmd, args[0])
+			query := ""
+			if len(args) == 1 {
+				query = args[0]
+			}
+			return runSearch(cmd, query)
 		},
 	}
 }
@@ -68,7 +73,11 @@ func runSearch(cmd *cobra.Command, query string) error {
 	})
 
 	if len(hits) == 0 {
-		console.Warn("No packages match %q", query)
+		if query == "" {
+			console.Warn("No packages available (run nem catalog update)")
+		} else {
+			console.Warn("No packages match %q", query)
+		}
 		return nil
 	}
 

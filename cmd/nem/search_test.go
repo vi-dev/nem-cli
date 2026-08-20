@@ -99,6 +99,55 @@ func TestSearchRanksExactPrefixSubstringDescription(t *testing.T) {
 	}
 }
 
+func TestSearchWithoutQueryListsAllPackagesSorted(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	catalogRoot := writeSearchDirCatalog(t, map[string]string{
+		"zeta":  "last tool",
+		"alpha": "first tool",
+		"mid":   "middle tool",
+	})
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "dev", catalogRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _, err := runNem(t, nemHomeDir, "search")
+	if err != nil {
+		t.Fatalf("search without query: %v", err)
+	}
+
+	var names []string
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 || fields[0] == "NAME" {
+			continue
+		}
+		names = append(names, fields[0])
+	}
+	want := []string{"alpha", "mid", "zeta"}
+	if strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Fatalf("listing = %v, want all packages sorted %v\n%s", names, want, out)
+	}
+}
+
+func TestSearchWithoutQueryEmptyListingExplainsItself(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	// A fresh nemHome holds only the auto-created, never-synced "official"
+	// catalog, so the listing is empty.
+	out, errb, err := runNem(t, nemHomeDir, "search")
+	if err != nil {
+		t.Fatalf("search without query: %v\nstderr: %s", err, errb)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("empty listing must print nothing on stdout:\n%s", out)
+	}
+	if strings.Contains(errb, `""`) {
+		t.Fatalf("empty listing must not mention an empty query:\n%s", errb)
+	}
+	if !strings.Contains(errb, "No packages available") {
+		t.Fatalf("expected empty-listing explanation on stderr:\n%s", errb)
+	}
+}
+
 func TestSearchDedupesByNameKeepingFirstCatalog(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	firstRoot := writeSearchDirCatalog(t, map[string]string{"shared": "first-desc"})
