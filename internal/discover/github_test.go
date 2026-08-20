@@ -124,3 +124,29 @@ func TestGithubVersionsHTTPError(t *testing.T) {
 		t.Fatalf("err = %v, want status error", err)
 	}
 }
+
+func TestGithubVersionsSuffix(t *testing.T) {
+	adv := advertisement(
+		oid+" HEAD\x00symref=HEAD:refs/heads/main\n",
+		oid+" refs/tags/v0.12.0-cli\n",
+		oid+" refs/tags/v0.13.0-cli\n",
+		oid+" refs/tags/v3.4.5\n",
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, adv)
+	}))
+	defer srv.Close()
+	restore := githubBase
+	githubBase = srv.URL
+	defer func() { githubBase = restore }()
+
+	got, err := githubVersions(context.Background(), srv.Client(),
+		&spec.GitHubDiscovery{Repo: "g/jib", Filter: `^v\d+\.\d+\.\d+-cli$`, Prefix: "v", Suffix: "-cli"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"0.12.0", "0.13.0"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("versions = %v, want %v", got, want)
+	}
+}

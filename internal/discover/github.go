@@ -65,7 +65,7 @@ func parseAdvertisement(r io.Reader) ([]string, error) {
 var githubBase = "https://github.com"
 
 // githubVersions lists g.Repo's tags and derives versions: filter regex
-// on raw tag names, strip the prefix, respell to the OCI tag grammar.
+// on raw tag names, strip the prefix and suffix, respell to the OCI tag grammar.
 func githubVersions(ctx context.Context, client *http.Client, g *spec.GitHubDiscovery) ([]string, error) {
 	var re *regexp.Regexp
 	if g.Filter != "" {
@@ -96,7 +96,7 @@ func githubVersions(ctx context.Context, client *http.Client, g *spec.GitHubDisc
 		if re != nil && !re.MatchString(t) {
 			continue
 		}
-		out = append(out, respell(strings.TrimPrefix(t, g.Prefix)))
+		out = append(out, respell(strings.TrimSuffix(strings.TrimPrefix(t, g.Prefix), g.Suffix)))
 	}
 	return out, nil
 }

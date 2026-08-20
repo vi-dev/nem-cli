@@ -51,8 +51,9 @@ type Discovery struct {
 	OCI    string
 }
 
-// GitHubDiscovery discovers versions from GitHub releases or tags.
-type GitHubDiscovery struct{ Repo, Filter, Prefix string }
+// GitHubDiscovery discovers versions from GitHub tags: filter regex on raw
+// tag names, then the prefix and suffix are stripped.
+type GitHubDiscovery struct{ Repo, Filter, Prefix, Suffix string }
 
 // Artifact is the download source for a package's versions.
 type Artifact struct {
