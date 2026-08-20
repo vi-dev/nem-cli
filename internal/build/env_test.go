@@ -21,7 +21,7 @@ func envMap(env []string) map[string]string {
 func TestComposeBuildEnv(t *testing.T) {
 	deps := []resolvedDep{
 		{Name: "make", Version: "v4", Prefix: "/nh/packages/make/v4", OnPath: true, Bins: []string{"bin"}},
-		{Name: "openssl", Version: "v3.4.0", Prefix: "/nh/packages/openssl/v3.4.0", OnLoaderPath: true, Libs: []string{"lib"}},
+		{Name: "openssl", Version: "v3.4.0", Prefix: "/nh/packages/openssl/v3.4.0", OnLoaderPath: true, Bins: []string{"bin"}, Libs: []string{"lib"}},
 		{Name: "libgpg-error", Version: "1.51", Prefix: "/nh/packages/libgpg-error/1.51", OnLoaderPath: true},
 	}
 	bctx := buildContext{
@@ -33,6 +33,14 @@ func TestComposeBuildEnv(t *testing.T) {
 
 	if !strings.HasPrefix(m["PATH"], "/nh/packages/make/v4/bin:") {
 		t.Fatalf("PATH must prepend run-dep bin: %q", m["PATH"])
+	}
+	// A link dep's bins join the PATH too: C libraries ship foo-config
+	// discovery scripts meant to be executed at build time.
+	if !strings.Contains(m["PATH"], "/nh/packages/openssl/v3.4.0/bin") {
+		t.Fatalf("PATH must include link-dep bin: %q", m["PATH"])
+	}
+	if strings.Contains(m["PATH"], "libgpg-error") {
+		t.Fatalf("dep without bins must not add a PATH entry: %q", m["PATH"])
 	}
 	if !strings.Contains(m["CPPFLAGS"], "-DBASE") || !strings.Contains(m["CPPFLAGS"], "-I/nh/packages/openssl/v3.4.0/include") {
 		t.Fatalf("CPPFLAGS must append to base and add link-dep include: %q", m["CPPFLAGS"])

@@ -178,10 +178,10 @@ func TestCatalogBuildRejectsAbsoluteRpathIntoPackages(t *testing.T) {
 // PATH.
 const probeStep = `mkdir -p "$NEM_OUTPUT" && (command -v foocli >/dev/null && echo ON_PATH || echo NOT_ON_PATH) > "$NEM_OUTPUT/probe"`
 
-// TestCatalogBuildKeepsDirectLinkDepBinsOffPath proves a direct build.dep
-// declared kind: link follows its own kind rather than always landing on
-// PATH: its bins stay off the build PATH.
-func TestCatalogBuildKeepsDirectLinkDepBinsOffPath(t *testing.T) {
+// TestCatalogBuildPutsDirectLinkDepBinsOnPath proves a kind: link build.dep
+// contributes its bins to the build PATH: C libraries ship foo-config
+// discovery scripts that configure scripts execute at build time.
+func TestCatalogBuildPutsDirectLinkDepBinsOnPath(t *testing.T) {
 	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
 		t.Skip("loader semantics differ off darwin/linux")
 	}
@@ -208,8 +208,8 @@ func TestCatalogBuildKeepsDirectLinkDepBinsOffPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "NOT_ON_PATH") {
-		t.Fatalf("a kind: link build dep's bins must stay off PATH; probe=%q", got)
+	if !strings.Contains(string(got), "ON_PATH") || strings.Contains(string(got), "NOT_ON_PATH") {
+		t.Fatalf("a kind: link build dep's bins must join the build PATH; probe=%q", got)
 	}
 }
 

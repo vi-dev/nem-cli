@@ -11,10 +11,12 @@ import (
 )
 
 // resolvedDep is one build dependency after resolution and install: its
-// prefix plus the role that decides its build-env contribution.
+// prefix plus the role that decides its build-env contribution. Bins join
+// the build PATH for both roles — C libraries ship foo-config discovery
+// scripts meant to be executed at build time.
 type resolvedDep struct {
 	Name, Version, Prefix string
-	OnPath                bool // its bins join the build PATH
+	OnPath                bool // a tool
 	OnLoaderPath          bool // a library: contributes -I/-L/rpath/pkgconfig
 	Bins, Libs            []string
 }
@@ -29,7 +31,7 @@ type buildContext struct {
 }
 
 // composeBuildEnv overlays the build scaffold onto base (the author's own
-// environment): run-dep bins prepended to PATH, each dep's prefix as
+// environment): every dep's bins prepended to PATH, each dep's prefix as
 // NEM_DEP_<NAME>_PREFIX, and each library dep's include/lib/pkgconfig flags —
 // make-escaped in CPPFLAGS/CFLAGS/LDFLAGS, exec-safe in CGO_CFLAGS/CGO_LDFLAGS.
 // Existing values are appended to, never clobbered.
@@ -41,7 +43,7 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 	newDTags := false
 	for _, d := range deps {
 		vars[depPrefixVar(d.Name)] = d.Prefix
-		if d.OnPath {
+		if d.OnPath || d.OnLoaderPath {
 			for _, b := range d.Bins {
 				pathDirs = append(pathDirs, filepath.Join(d.Prefix, b))
 			}
