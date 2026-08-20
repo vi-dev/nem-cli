@@ -67,9 +67,11 @@ func loopbackRegistry(host string) bool {
 }
 
 // NewRemoteRepository opens ref as a *remote.Repository with docker-config
-// credentials. Loopback registries (localhost, 127.0.0.0/8, ::1) are
-// contacted over plain HTTP so local development registries work without
-// TLS; every other host is HTTPS-only.
+// credentials, consulted only for registries the user has a stored docker
+// login for — every other registry is accessed anonymously, so a configured
+// credential helper is never exec'd for public pulls. Loopback registries
+// (localhost, 127.0.0.0/8, ::1) are contacted over plain HTTP so local
+// development registries work without TLS; every other host is HTTPS-only.
 func NewRemoteRepository(ref string) (*remote.Repository, error) {
 	repo, err := remote.NewRepository(ref)
 	if err != nil {
@@ -80,8 +82,16 @@ func NewRemoteRepository(ref string) (*remote.Repository, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open docker credentials: %w", err)
 	}
+	configPath, err := dockerConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	stored, err := storedAuthHosts(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read docker config: %w", err)
+	}
 	repo.Client = &auth.Client{
-		Credential: credentials.Credential(credStore),
+		Credential: gatedCredential(stored, credentials.Credential(credStore)),
 		Cache:      auth.NewCache(),
 	}
 	return repo, nil
