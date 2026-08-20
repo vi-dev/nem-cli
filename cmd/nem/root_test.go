@@ -2,10 +2,47 @@ package main
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/vi-dev/nem-cli/internal/report"
 )
+
+func TestRootHelpGroups(t *testing.T) {
+	root := newRoot()
+	var buf bytes.Buffer
+	root.SetOut(&buf)
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"--help"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("--help: %v", err)
+	}
+	out := buf.String()
+	titles := []string{"Environment:", "Discovery:", "Catalogs:", "Shell integration:"}
+	last := -1
+	for _, title := range titles {
+		i := strings.Index(out, title)
+		if i < 0 {
+			t.Fatalf("help output missing group %q:\n%s", title, out)
+		}
+		if i < last {
+			t.Fatalf("group %q listed out of order:\n%s", title, out)
+		}
+		last = i
+	}
+}
+
+func TestEveryRootCommandGrouped(t *testing.T) {
+	root := newRoot()
+	for _, c := range root.Commands() {
+		if c.Name() == "version" {
+			continue
+		}
+		if c.GroupID == "" {
+			t.Errorf("command %q has no group", c.Name())
+		}
+	}
+}
 
 func TestUnknownCommandIsUsageError(t *testing.T) {
 	root := newRoot()

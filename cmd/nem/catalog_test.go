@@ -262,3 +262,48 @@ func TestCatalogReorder(t *testing.T) {
 		t.Fatal("partial reorder must fail")
 	}
 }
+
+func TestCatalogHelpGroups(t *testing.T) {
+	out, _, err := runNem(t, t.TempDir(), "catalog", "--help")
+	if err != nil {
+		t.Fatalf("catalog --help: %v", err)
+	}
+	consumption := strings.Index(out, "Catalog consumption:")
+	maintenance := strings.Index(out, "Catalog maintenance:")
+	if consumption < 0 || maintenance < 0 {
+		t.Fatalf("catalog help missing group titles:\n%s", out)
+	}
+	if maintenance < consumption {
+		t.Fatalf("catalog groups listed out of order:\n%s", out)
+	}
+}
+
+func TestCatalogCommandGroupMembership(t *testing.T) {
+	want := map[string]string{
+		"add":      catalogGroupConsumption,
+		"list":     catalogGroupConsumption,
+		"remove":   catalogGroupConsumption,
+		"update":   catalogGroupConsumption,
+		"reorder":  catalogGroupConsumption,
+		"disable":  catalogGroupConsumption,
+		"enable":   catalogGroupConsumption,
+		"lint":     catalogGroupMaintenance,
+		"fmt":      catalogGroupMaintenance,
+		"build":    catalogGroupMaintenance,
+		"bump":     catalogGroupMaintenance,
+		"outdated": catalogGroupMaintenance,
+		"missing":  catalogGroupMaintenance,
+		"diff":     catalogGroupMaintenance,
+		"publish":  catalogGroupMaintenance,
+	}
+	for _, c := range newCatalogCmd().Commands() {
+		group, ok := want[c.Name()]
+		if !ok {
+			t.Errorf("command %q is not classified in the grouping map; add it", c.Name())
+			continue
+		}
+		if c.GroupID != group {
+			t.Errorf("command %q in group %q, want %q", c.Name(), c.GroupID, group)
+		}
+	}
+}

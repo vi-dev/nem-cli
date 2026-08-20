@@ -26,12 +26,22 @@ var syncCatalog = func(ctx context.Context, ref, storePath string) (string, erro
 	return ocix.SyncFrom(ctx, src, srcRef, storePath)
 }
 
+const (
+	catalogGroupConsumption = "consumption"
+	catalogGroupMaintenance = "maintenance"
+)
+
 func newCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "catalog",
 		Short: "Manage catalogs",
 	}
-	cmd.AddCommand(newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogLintCmd(), newCatalogPublishCmd(), newCatalogDisableCmd(), newCatalogEnableCmd(), newCatalogBuildCmd(), newCatalogFmtCmd(), newCatalogOutdatedCmd(), newCatalogBumpCmd(), newCatalogMissingCmd(), newCatalogDiffCmd())
+	cmd.AddGroup(
+		&cobra.Group{ID: catalogGroupConsumption, Title: "Catalog consumption:"},
+		&cobra.Group{ID: catalogGroupMaintenance, Title: "Catalog maintenance:"},
+	)
+	addGrouped(cmd, catalogGroupConsumption, newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogDisableCmd(), newCatalogEnableCmd())
+	addGrouped(cmd, catalogGroupMaintenance, newCatalogLintCmd(), newCatalogFmtCmd(), newCatalogBuildCmd(), newCatalogBumpCmd(), newCatalogOutdatedCmd(), newCatalogMissingCmd(), newCatalogDiffCmd(), newCatalogPublishCmd())
 	return cmd
 }
 

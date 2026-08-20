@@ -59,9 +59,34 @@ func newRoot() *cobra.Command {
 	//    so those failures exit 1 (runtime), not 2 (usage).
 	//  - a subcommand defining its own PersistentPreRunE REPLACES this root
 	//    hook — console/nemHome would stay nil. Don't do that.
-	root.AddCommand(newVersionCmd(), newStatusCmd(), newCatalogCmd(), newUseCmd(), newUnuseCmd(), newLockCmd(), newSyncCmd(),
-		newEnvCmd(), newActivateCmd(), newDeactivateCmd(), newExecCmd(), newWhichCmd(), newSearchCmd(), newInfoCmd())
+	root.AddGroup(
+		&cobra.Group{ID: groupEnvironment, Title: "Environment:"},
+		&cobra.Group{ID: groupDiscovery, Title: "Discovery:"},
+		&cobra.Group{ID: groupCatalogs, Title: "Catalogs:"},
+		&cobra.Group{ID: groupShell, Title: "Shell integration:"},
+	)
+	addGrouped(root, groupEnvironment, newUseCmd(), newUnuseCmd(), newLockCmd(), newSyncCmd(), newStatusCmd(), newExecCmd(), newWhichCmd())
+	addGrouped(root, groupDiscovery, newSearchCmd(), newInfoCmd())
+	addGrouped(root, groupCatalogs, newCatalogCmd())
+	addGrouped(root, groupShell, newActivateCmd(), newDeactivateCmd(), newEnvCmd())
+	root.AddCommand(newVersionCmd())
 	return root
+}
+
+const (
+	groupEnvironment = "environment"
+	groupDiscovery   = "discovery"
+	groupCatalogs    = "catalogs"
+	groupShell       = "shell"
+)
+
+// addGrouped registers cmds under parent with the given help group. The
+// group must already be registered on parent via AddGroup.
+func addGrouped(parent *cobra.Command, groupID string, cmds ...*cobra.Command) {
+	for _, c := range cmds {
+		c.GroupID = groupID
+	}
+	parent.AddCommand(cmds...)
 }
 
 // resolveColorMode maps the --color flag to a report.Mode, downgrading auto
