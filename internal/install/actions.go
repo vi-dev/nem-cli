@@ -37,6 +37,7 @@ func RunActions(pkg *spec.Package, stagingDir, artifactPath, version string, pla
 	}
 	defer root.Close()
 
+	singleName := singleFileName(pkg, version, platform)
 	ran := 0
 	for i, a := range pkg.Install {
 		if !spec.PlatformsInclude(a.Platforms, platform) {
@@ -46,7 +47,7 @@ func RunActions(pkg *spec.Package, stagingDir, artifactPath, version string, pla
 		if err != nil {
 			return fmt.Errorf("install[%d]: %w", i, err)
 		}
-		if err := runAction(a, root, artifactPath); err != nil {
+		if err := runAction(a, root, artifactPath, singleName); err != nil {
 			return fmt.Errorf("install[%d]: %w", i, err)
 		}
 		ran++
@@ -60,10 +61,10 @@ func RunActions(pkg *spec.Package, stagingDir, artifactPath, version string, pla
 	return nil
 }
 
-func runAction(a spec.Action, root *os.Root, artifactPath string) error {
+func runAction(a spec.Action, root *os.Root, artifactPath, singleName string) error {
 	switch {
 	case a.Extract != nil:
-		return extract(artifactPath, root, a.Extract.Strip)
+		return extract(artifactPath, root, a.Extract.Strip, singleName)
 	case a.Copy != nil:
 		return runCopy(a.Copy, root, artifactPath)
 	case a.Move != nil:
@@ -111,6 +112,18 @@ func runCopy(a *spec.CopyAction, root *os.Root, artifactPath string) error {
 		return fmt.Errorf("copy to %s: %w", a.Dst, err)
 	}
 	return out.Close()
+}
+
+// mkdirParent ensures relPath's parent directory exists under root.
+func mkdirParent(root *os.Root, relPath string) error {
+	dir := filepath.Dir(relPath)
+	if dir == "." {
+		return nil
+	}
+	if err := root.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("create dir %s: %w", dir, err)
+	}
+	return nil
 }
 
 func runMove(a *spec.MoveAction, root *os.Root) error {

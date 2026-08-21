@@ -292,7 +292,7 @@ func TestRunActionsExtractEscapeEntryRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "escapes staging dir") {
+	if !strings.Contains(err.Error(), "escapes extraction root") {
 		t.Fatalf("error = %v, want containment error", err)
 	}
 	mustNotExist(t, filepath.Join(tmp, "evil"))
@@ -311,7 +311,7 @@ func TestRunActionsExtractZipEscapeEntryRejected(t *testing.T) {
 	artifact := writeArtifact(t, tmp, archive)
 
 	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
-	if err == nil || !strings.Contains(err.Error(), "escapes staging dir") {
+	if err == nil || !strings.Contains(err.Error(), "escapes extraction root") {
 		t.Fatalf("error = %v, want containment error", err)
 	}
 	mustNotExist(t, filepath.Join(tmp, "evil"))
@@ -355,7 +355,7 @@ func TestRunActionsExtractEscapingRelativeSymlinkTargetRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
-	if !strings.Contains(err.Error(), "escapes staging dir") {
+	if !strings.Contains(err.Error(), "escapes extraction root") {
 		t.Fatalf("error = %v, want containment error", err)
 	}
 	mustNotExist(t, filepath.Join(staging, "a", "link"))
@@ -767,6 +767,75 @@ func TestRunActionsExtractLargeTarGzStreams(t *testing.T) {
 	small, err := os.ReadFile(filepath.Join(staging, "small.txt"))
 	if err != nil || string(small) != "small" {
 		t.Fatalf("small.txt = %q, %v, want %q", small, err, "small")
+	}
+}
+
+func TestRunActionsExtractSingleFileGzNamedFromURL(t *testing.T) {
+	archive := gzipBytes(t, []byte("#!/bin/sh\necho hi\n"))
+
+	tmp := t.TempDir()
+	staging := filepath.Join(tmp, "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	artifact := writeArtifact(t, tmp, archive)
+
+	pkg := extractPkg(0)
+	pkg.Artifact = spec.Artifact{URL: "https://ex.com/dl/tool-{{.Version}}.gz?token=x"}
+	if err := install.RunActions(pkg, staging, artifact, "v1", spec.Current()); err != nil {
+		t.Fatalf("RunActions: %v", err)
+	}
+
+	out := filepath.Join(staging, "tool-v1")
+	got, err := os.ReadFile(out)
+	if err != nil || string(got) != "#!/bin/sh\necho hi\n" {
+		t.Fatalf("tool-v1 = %q, %v, want script content", got, err)
+	}
+	info, err := os.Stat(out)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("tool-v1 mode = %v, %v, want 0755", info.Mode().Perm(), err)
+	}
+}
+
+func TestRunActionsExtractSingleFileZstdNamedFromGitHubAsset(t *testing.T) {
+	archive := zstdBytes(t, []byte("zstd-binary"))
+
+	tmp := t.TempDir()
+	staging := filepath.Join(tmp, "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	artifact := writeArtifact(t, tmp, archive)
+
+	pkg := extractPkg(0)
+	pkg.Artifact = spec.Artifact{GitHub: &spec.GitHubAsset{Repo: "o/r", Asset: "tool_{{.Version}}.zst"}}
+	if err := install.RunActions(pkg, staging, artifact, "v1", spec.Current()); err != nil {
+		t.Fatalf("RunActions: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(staging, "tool_v1"))
+	if err != nil || string(got) != "zstd-binary" {
+		t.Fatalf("tool_v1 = %q, %v, want %q", got, err, "zstd-binary")
+	}
+}
+
+// TestRunActionsExtractSingleFileWithoutArtifactNameErrors: with no
+// artifact URL or asset to derive a name from, a compressed single file
+// has no place to land and must be rejected rather than written under
+// some invented name.
+func TestRunActionsExtractSingleFileWithoutArtifactNameErrors(t *testing.T) {
+	archive := gzipBytes(t, []byte("just bytes"))
+
+	tmp := t.TempDir()
+	staging := filepath.Join(tmp, "staging")
+	if err := os.MkdirAll(staging, 0o755); err != nil {
+		t.Fatalf("mkdir staging: %v", err)
+	}
+	artifact := writeArtifact(t, tmp, archive)
+
+	err := install.RunActions(extractPkg(0), staging, artifact, "v1", spec.Current())
+	if err == nil || !strings.Contains(err.Error(), "single file") {
+		t.Fatalf("error = %v, want single-file naming error", err)
 	}
 }
 

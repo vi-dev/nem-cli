@@ -2,6 +2,7 @@ package build
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -146,7 +147,7 @@ func TestUnpackSourcePathEscapeRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := unpackSource(arc, dest); err == nil {
+	if _, err := unpackSource(arc, dest, ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if _, err := os.Stat(filepath.Join(base, "escape.txt")); !os.IsNotExist(err) {
@@ -161,7 +162,7 @@ func TestUnpackSourceHardlinkRejected(t *testing.T) {
 	})
 	arc := writeArchive(t, t.TempDir(), tgz)
 
-	if _, err := unpackSource(arc, t.TempDir()); err == nil {
+	if _, err := unpackSource(arc, t.TempDir(), ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 }
@@ -173,7 +174,7 @@ func TestUnpackSourceAbsoluteSymlinkTargetRejected(t *testing.T) {
 	arc := writeArchive(t, t.TempDir(), tgz)
 	dest := t.TempDir()
 
-	if _, err := unpackSource(arc, dest); err == nil {
+	if _, err := unpackSource(arc, dest, ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if _, err := os.Lstat(filepath.Join(dest, "link")); !os.IsNotExist(err) {
@@ -200,7 +201,7 @@ func TestUnpackSourceSymlinkChainEscapeRejected(t *testing.T) {
 	})
 	arc := writeArchive(t, container, tgz)
 
-	if _, err := unpackSource(arc, dest); err == nil {
+	if _, err := unpackSource(arc, dest, ""); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 	if _, err := os.Stat(filepath.Join(container, "x")); !os.IsNotExist(err) {
@@ -215,7 +216,7 @@ func TestUnpackSourceStripsSingleRoot(t *testing.T) {
 	tgz := makeTarGz(t, map[string]string{"src-1.0/configure": "#!/bin/sh\n", "src-1.0/main.c": "x"})
 	arc := filepath.Join(t.TempDir(), "s.tar.gz")
 	os.WriteFile(arc, tgz, 0o644)
-	root, err := unpackSource(arc, t.TempDir())
+	root, err := unpackSource(arc, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unpackSource: %v", err)
 	}
@@ -239,7 +240,7 @@ func TestUnpackSourceBzip2(t *testing.T) {
 	if err := os.WriteFile(arc, raw, 0o644); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	root, err := unpackSource(arc, t.TempDir())
+	root, err := unpackSource(arc, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unpackSource: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestUnpackSourceXz(t *testing.T) {
 	if err := os.WriteFile(arc, txz, 0o644); err != nil {
 		t.Fatalf("write archive: %v", err)
 	}
-	root, err := unpackSource(arc, t.TempDir())
+	root, err := unpackSource(arc, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unpackSource: %v", err)
 	}
@@ -349,7 +350,7 @@ func TestUnpackSourceZstd(t *testing.T) {
 	if err := os.WriteFile(arc, tzst, 0o644); err != nil {
 		t.Fatalf("write archive: %v", err)
 	}
-	root, err := unpackSource(arc, t.TempDir())
+	root, err := unpackSource(arc, t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("unpackSource: %v", err)
 	}
@@ -368,13 +369,106 @@ func TestUnpackSourceZstd(t *testing.T) {
 	}
 }
 
-func TestUnpackSourceUnsupportedCompression(t *testing.T) {
-	arc := filepath.Join(t.TempDir(), "s.zip")
-	// PK zip magic — a real archive format, but not one unpackSource handles.
-	if err := os.WriteFile(arc, []byte("PK\x03\x04rest-of-file"), 0o644); err != nil {
+func TestUnpackSourceUnrecognizedFormat(t *testing.T) {
+	arc := filepath.Join(t.TempDir(), "s.txt")
+	if err := os.WriteFile(arc, []byte("not an archive at all"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := unpackSource(arc, t.TempDir()); err == nil {
-		t.Fatal("expected error for unsupported compression, got nil")
+	if _, err := unpackSource(arc, t.TempDir(), ""); err == nil {
+		t.Fatal("expected error for unrecognized format, got nil")
+	}
+}
+
+func TestUnpackSourceZip(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range map[string]string{"src-1.0/configure": "#!/bin/sh\n", "src-1.0/main.c": "x"} {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("create zip entry %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("write zip entry %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip writer: %v", err)
+	}
+	arc := filepath.Join(t.TempDir(), "s.zip")
+	if err := os.WriteFile(arc, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	root, err := unpackSource(arc, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if filepath.Base(root) != "src-1.0" {
+		t.Fatalf("root = %q, want basename src-1.0", root)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "configure"))
+	if err != nil || string(got) != "#!/bin/sh\n" {
+		t.Fatalf("configure = %q, %v", got, err)
+	}
+}
+
+func TestUnpackSourcePlainTar(t *testing.T) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	hdr := &tar.Header{Name: "src-1.0/main.c", Mode: 0o644, Size: 1}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("write tar header: %v", err)
+	}
+	if _, err := tw.Write([]byte("x")); err != nil {
+		t.Fatalf("write tar content: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar writer: %v", err)
+	}
+	arc := filepath.Join(t.TempDir(), "s.tar")
+	if err := os.WriteFile(arc, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	root, err := unpackSource(arc, t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if filepath.Base(root) != "src-1.0" {
+		t.Fatalf("root = %q, want basename src-1.0", root)
+	}
+	if _, err := os.Stat(filepath.Join(root, "main.c")); err != nil {
+		t.Fatalf("expected main.c at stripped root: %v", err)
+	}
+}
+
+// TestUnpackSourceSingleFile: a source that is one compressed file, not a
+// tarball. It lands under its derived name and the source root is the
+// destination dir itself.
+func TestUnpackSourceSingleFile(t *testing.T) {
+	var buf bytes.Buffer
+	gw := gzip.NewWriter(&buf)
+	if _, err := gw.Write([]byte("int main(){}\n")); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := gw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	arc := filepath.Join(t.TempDir(), "main.c.gz")
+	if err := os.WriteFile(arc, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write archive: %v", err)
+	}
+
+	dest := t.TempDir()
+	root, err := unpackSource(arc, dest, "main.c")
+	if err != nil {
+		t.Fatalf("unpackSource: %v", err)
+	}
+	if root != dest {
+		t.Fatalf("root = %q, want dest dir %q", root, dest)
+	}
+	got, err := os.ReadFile(filepath.Join(dest, "main.c"))
+	if err != nil || string(got) != "int main(){}\n" {
+		t.Fatalf("main.c = %q, %v", got, err)
 	}
 }

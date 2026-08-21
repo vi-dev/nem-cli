@@ -84,7 +84,7 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 	if err := os.MkdirAll(srcDir, 0o755); err != nil {
 		return Result{}, fmt.Errorf("create source dir: %w", err)
 	}
-	srcRoot, err := unpackSource(path, srcDir)
+	srcRoot, err := unpackSource(path, srcDir, sourceSingleName(pkg, version))
 	if err != nil {
 		return Result{}, err
 	}

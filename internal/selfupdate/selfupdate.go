@@ -3,22 +3,21 @@
 package selfupdate
 
 import (
-	"archive/tar"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
 
+	"github.com/vi-dev/nem-cli/internal/archive"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
@@ -185,53 +184,65 @@ func assetName(version, goos, goarch string) string {
 
 // parseChecksums finds filename's hex digest in a GoReleaser checksums.txt
 // body ("<sha256>  <filename>" lines).
-// extractBinary pulls the nem binary out of the release tar.gz at
+// extractBinary pulls the nem binary out of the release archive at
 // archivePath and writes it, executable, to destPath. GoReleaser may place
 // the binary at the archive root or inside a directory named after the
-// archive; matching by base name accepts either.
+// archive; the extracted tree is searched for the base name "nem".
 func extractBinary(archivePath, destPath string) error {
-	f, err := os.Open(archivePath)
+	dir, err := os.MkdirTemp("", "nem-update-*")
 	if err != nil {
-		return fmt.Errorf("open archive: %w", err)
+		return fmt.Errorf("create extraction dir: %w", err)
 	}
-	defer f.Close()
-
-	gr, err := gzip.NewReader(f)
+	defer os.RemoveAll(dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return fmt.Errorf("open gzip stream: %w", err)
+		return fmt.Errorf("open extraction dir: %w", err)
 	}
-	defer gr.Close()
+	defer root.Close()
+	if _, err := archive.Extract(archivePath, root, archive.Options{SingleName: "nem"}); err != nil {
+		return fmt.Errorf("extract release archive: %w", err)
+	}
 
-	tr := tar.NewReader(gr)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return errors.New("no nem binary found in release archive")
-		}
+	var src string
+	err = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return fmt.Errorf("read tar entry: %w", err)
+			return err
 		}
-		if hdr.Typeflag != tar.TypeReg || path.Base(hdr.Name) != "nem" {
-			continue
-		}
-		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
-		if err != nil {
-			return fmt.Errorf("create %s: %w", destPath, err)
-		}
-		if _, err := io.Copy(out, tr); err != nil {
-			out.Close()
-			return fmt.Errorf("write %s: %w", destPath, err)
-		}
-		if err := out.Close(); err != nil {
-			return fmt.Errorf("close %s: %w", destPath, err)
-		}
-		// OpenFile's mode only applies when it creates the file; an existing
-		// destination (the pre-created staging file) keeps its old mode.
-		if err := os.Chmod(destPath, 0o755); err != nil {
-			return fmt.Errorf("chmod %s: %w", destPath, err)
+		if !d.IsDir() && d.Name() == "nem" {
+			src = path
+			return fs.SkipAll
 		}
 		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("search release archive: %w", err)
 	}
+	if src == "" {
+		return errors.New("no nem binary found in release archive")
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open extracted binary: %w", err)
+	}
+	defer in.Close()
+	out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", destPath, err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return fmt.Errorf("write %s: %w", destPath, err)
+	}
+	if err := out.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", destPath, err)
+	}
+	// OpenFile's mode only applies when it creates the file; an existing
+	// destination (the pre-created staging file) keeps its old mode.
+	if err := os.Chmod(destPath, 0o755); err != nil {
+		return fmt.Errorf("chmod %s: %w", destPath, err)
+	}
+	return nil
 }
 
 func parseChecksums(data []byte, filename string) (string, error) {

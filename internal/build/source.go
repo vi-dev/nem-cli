@@ -1,24 +1,15 @@
 package build
 
 import (
-	"archive/tar"
-	"bufio"
-	"bytes"
-	"compress/bzip2"
-	"compress/gzip"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
-	"github.com/klauspost/compress/zstd"
-	"github.com/ulikunitz/xz"
-
+	"github.com/vi-dev/nem-cli/internal/archive"
 	"github.com/vi-dev/nem-cli/internal/fetch"
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 // fetchSource downloads url into dir. When wantSHA256 is set, it delegates
@@ -42,200 +33,39 @@ func fetchSource(ctx context.Context, client *http.Client, url, wantSHA256, dir 
 	return path, sum, false, nil
 }
 
-// unpackSource extracts archivePath, a gzip-, bzip2-, xz-, or
-// zstd-compressed tar, into destDir. Every entry is written at its full archive path (no path
-// components are dropped), so when the archive holds one common leading
-// directory (the usual "name-version/" shape of a source release), that
-// directory ends up directly under destDir, and root reports its path. When
-// entries don't share one leading segment, root is destDir itself.
-//
-// Every write is routed through an os.Root rooted at destDir, so a symlink
-// planted by an earlier entry can't redirect a later entry's lexically
-// safe-looking path outside destDir once the OS follows it. Entries whose
-// path is not filepath.IsLocal (absolute, or escaping via "..") are
-// rejected, as are hardlinks; symlinks are allowed only when their target
-// stays inside destDir.
-func unpackSource(archivePath, destDir string) (root string, err error) {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return "", fmt.Errorf("open archive %s: %w", archivePath, err)
-	}
-	defer f.Close()
-
-	decompressed, err := decompressStream(f)
-	if err != nil {
-		return "", err
-	}
-
+// unpackSource extracts archivePath — tar (plain or gzip-, bzip2-, xz-, or
+// zstd-compressed), zip, or a compressed single file (landing as
+// singleName) — into destDir via the archive package, which confines every
+// write to destDir through an os.Root. Every entry is written at its full
+// archive path (no path components are dropped), so when the archive holds
+// one common leading directory (the usual "name-version/" shape of a
+// source release), that directory ends up directly under destDir, and root
+// reports its path. When entries don't share one leading segment — or the
+// source was a single compressed file — root is destDir itself.
+func unpackSource(archivePath, destDir, singleName string) (root string, err error) {
 	dirRoot, err := os.OpenRoot(destDir)
 	if err != nil {
 		return "", fmt.Errorf("open destination dir %s: %w", destDir, err)
 	}
 	defer dirRoot.Close()
 
-	tr := tar.NewReader(decompressed)
-	var commonSeg string
-	sawEntry, multipleRoots := false, false
-
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("read tar entry: %w", err)
-		}
-		// PAX extended headers apply to the next entry and are not
-		// themselves filesystem objects.
-		if hdr.Typeflag == tar.TypeXHeader || hdr.Typeflag == tar.TypeXGlobalHeader {
-			continue
-		}
-
-		parts, relPath, ok := splitTarPath(hdr.Name)
-		if !ok {
-			continue
-		}
-		if !filepath.IsLocal(relPath) {
-			return "", fmt.Errorf("entry %q escapes destination dir", hdr.Name)
-		}
-
-		if !sawEntry {
-			commonSeg, sawEntry = parts[0], true
-		} else if parts[0] != commonSeg {
-			multipleRoots = true
-		}
-
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := dirRoot.MkdirAll(relPath, 0o755); err != nil {
-				return "", fmt.Errorf("create dir %s: %w", relPath, err)
-			}
-		case tar.TypeReg:
-			if err := mkdirParent(dirRoot, relPath); err != nil {
-				return "", err
-			}
-			if err := writeRegularFile(dirRoot, relPath, tr, os.FileMode(hdr.Mode)&0o777); err != nil {
-				return "", err
-			}
-		case tar.TypeSymlink:
-			if err := checkSymlinkContainment(relPath, hdr.Linkname); err != nil {
-				return "", err
-			}
-			if err := mkdirParent(dirRoot, relPath); err != nil {
-				return "", err
-			}
-			if err := dirRoot.Symlink(hdr.Linkname, relPath); err != nil {
-				return "", fmt.Errorf("create symlink %s: %w", relPath, err)
-			}
-		case tar.TypeLink:
-			return "", errors.New("hardlinks are not supported")
-		default:
-			return "", fmt.Errorf("entry %q: unsupported tar type %v", hdr.Name, hdr.Typeflag)
-		}
+	res, err := archive.Extract(archivePath, dirRoot, archive.Options{SingleName: singleName})
+	if err != nil {
+		return "", err
 	}
-
-	if sawEntry && !multipleRoots {
-		return filepath.Join(destDir, commonSeg), nil
+	if res.CommonPrefix != "" {
+		return filepath.Join(destDir, res.CommonPrefix), nil
 	}
 	return destDir, nil
 }
 
-// decompressStream wraps r in the decompressor matching its leading magic
-// bytes: gzip (1f 8b), bzip2 ("BZh"), xz (fd 37 7a 58 5a 00), or zstd
-// (28 b5 2f fd). Source releases ship as one of these; anything else is
-// rejected rather than fed to tar as-is.
-func decompressStream(r io.Reader) (io.Reader, error) {
-	gzipMagic := []byte{0x1f, 0x8b}
-	bzip2Magic := []byte("BZh")
-	xzMagic := []byte{0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00}
-	zstdMagic := []byte{0x28, 0xb5, 0x2f, 0xfd}
-
-	br := bufio.NewReader(r)
-	// A stream shorter than the longest magic can't be a valid archive;
-	// tolerate the short peek and let the default branch reject it.
-	magic, err := br.Peek(len(xzMagic))
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("read archive header: %w", err)
-	}
-	switch {
-	case bytes.HasPrefix(magic, gzipMagic):
-		gr, err := gzip.NewReader(br)
-		if err != nil {
-			return nil, fmt.Errorf("open gzip stream: %w", err)
-		}
-		return gr, nil
-	case bytes.HasPrefix(magic, bzip2Magic):
-		return bzip2.NewReader(br), nil
-	case bytes.HasPrefix(magic, xzMagic):
-		xr, err := xz.NewReader(br)
-		if err != nil {
-			return nil, fmt.Errorf("open xz stream: %w", err)
-		}
-		return xr, nil
-	case bytes.HasPrefix(magic, zstdMagic):
-		zr, err := zstd.NewReader(br)
-		if err != nil {
-			return nil, fmt.Errorf("open zstd stream: %w", err)
-		}
-		return zr, nil
-	default:
-		return nil, fmt.Errorf("unsupported source compression (magic %x); want gzip, bzip2, xz, or zstd", magic)
-	}
-}
-
-// splitTarPath splits a tar entry's "/"-separated name into its non-empty
-// path components and the equivalent OS-native relative path. ok is false
-// for a name with no components left (e.g. "/" or "").
-func splitTarPath(name string) (parts []string, relPath string, ok bool) {
-	for _, p := range strings.Split(name, "/") {
-		if p != "" {
-			parts = append(parts, p)
-		}
-	}
-	if len(parts) == 0 {
-		return nil, "", false
-	}
-	return parts, filepath.FromSlash(strings.Join(parts, "/")), true
-}
-
-// checkSymlinkContainment rejects an absolute target outright, and
-// otherwise resolves target against relEntryPath's directory (itself
-// already verified local to destDir) to confirm the link stays inside
-// destDir too. This lexical check can't see that relEntryPath's own
-// directory might really be somewhere else because an earlier entry
-// aliased it via a symlink — routing the actual write through os.Root
-// catches that case.
-func checkSymlinkContainment(relEntryPath, target string) error {
-	if filepath.IsAbs(target) {
-		return fmt.Errorf("symlink %s: target %q is absolute", relEntryPath, target)
-	}
-	resolved := filepath.Join(filepath.Dir(relEntryPath), target)
-	if !filepath.IsLocal(resolved) {
-		return fmt.Errorf("symlink %s: target %q escapes destination dir", relEntryPath, target)
-	}
-	return nil
-}
-
-// mkdirParent ensures relPath's parent directory exists under root.
-func mkdirParent(root *os.Root, relPath string) error {
-	dir := filepath.Dir(relPath)
-	if dir == "." {
-		return nil
-	}
-	if err := root.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create dir %s: %w", dir, err)
-	}
-	return nil
-}
-
-func writeRegularFile(root *os.Root, relPath string, r io.Reader, mode os.FileMode) error {
-	f, err := root.OpenFile(relPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+// sourceSingleName derives the name a compressed single-file source
+// extracts to from the package's source URL; "" when unresolvable, which
+// rejects such sources rather than inventing a name.
+func sourceSingleName(pkg *spec.Package, version string) string {
+	url, err := pkg.BuildSourceURL(version, spec.Current())
 	if err != nil {
-		return fmt.Errorf("create file %s: %w", relPath, err)
+		return ""
 	}
-	if _, err := io.Copy(f, r); err != nil {
-		f.Close()
-		return fmt.Errorf("write file %s: %w", relPath, err)
-	}
-	return f.Close()
+	return archive.SingleNameFromRef(url)
 }
