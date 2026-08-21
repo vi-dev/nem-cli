@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.2.0](https://github.com/vi-dev/nem-cli/compare/v0.1.1...v0.2.0) (2026-08-21)
+
+
+### Features
+
+* Add catalog diff command ([1bdf7a6](https://github.com/vi-dev/nem-cli/commit/1bdf7a6fb44008a2fcc79035dcd9bf8b0ac60ecc))
+* Add catalog missing command ([963b7bf](https://github.com/vi-dev/nem-cli/commit/963b7bf39ac580150925f16347d54f6e5b5496df))
+* Add catalog outdated, bump, and fmt commands ([1f3a8ac](https://github.com/vi-dev/nem-cli/commit/1f3a8ac86c187faafa571c146bf748309f71f430))
+* Add http version discovery scraping versions from a page ([49b51af](https://github.com/vi-dev/nem-cli/commit/49b51af4d36c731bd53f6b023c3fe308068012dc))
+* Add info command showing package details and versions ([c48d539](https://github.com/vi-dev/nem-cli/commit/c48d539ca5a023d61090854af90cc0f76a0e2101))
+* Add lock command and global sync scope ([5a0ef49](https://github.com/vi-dev/nem-cli/commit/5a0ef49190fca1d3443a2b102b3af96ec65fb90e))
+* Add nem clean to reclaim disk space ([97002c0](https://github.com/vi-dev/nem-cli/commit/97002c0c8f41cce84623dd000b2d90321d538de2))
+* Add nem self update to update the installed binary ([299c327](https://github.com/vi-dev/nem-cli/commit/299c327fa9247a17590944414d058d3f57769794))
+* Compose dep prefixes, rpath-link, and cgo flags into the build env ([a5e6b8c](https://github.com/vi-dev/nem-cli/commit/a5e6b8c778976a72e52c91319e6be9136ffcf877))
+* Expand templates in install action paths ([5ee6311](https://github.com/vi-dev/nem-cli/commit/5ee63110127a1fd1b144895103f70e4422cc4423))
+* Filter install actions and build steps by platform ([34cb950](https://github.com/vi-dev/nem-cli/commit/34cb950e59786e243c4996c09df02d11549dc313))
+* Group commands in help output ([513b99a](https://github.com/vi-dev/nem-cli/commit/513b99a4aca68909de690de44a196a051c568b0e))
+* List all packages when search has no query ([eddbb85](https://github.com/vi-dev/nem-cli/commit/eddbb85fa94b13e73b9b10300ffdbf5d2ca32861))
+* Normalize source build output trees ([d67a213](https://github.com/vi-dev/nem-cli/commit/d67a2131fb4edf113e3de44d4e4b6fbae5c05bef))
+* Put link deps' bins on the build PATH ([414a602](https://github.com/vi-dev/nem-cli/commit/414a602cb10bb29e86fb58b6829ff633012a5c3b))
+* Reject versions that are not valid OCI tags ([0667f98](https://github.com/vi-dev/nem-cli/commit/0667f98d51c22f3706e388ade09836c0622be472))
+* Strip a declared suffix in github version discovery ([6d6f5b3](https://github.com/vi-dev/nem-cli/commit/6d6f5b351d3a1cee4f35cfde53ade4c6ad70bab4))
+* Support gitlab and generic git version discovery sources ([d4a0749](https://github.com/vi-dev/nem-cli/commit/d4a07492c5f2ce2004a582e0bfa0b9218f496c1e))
+* Support xz-compressed source tarballs ([e49e823](https://github.com/vi-dev/nem-cli/commit/e49e8232af4b142e9bb651343c65df0467b87022))
+* Support zstd-compressed source tarballs ([520d456](https://github.com/vi-dev/nem-cli/commit/520d456e480cf45d35e238ad2e27aee7cfe9f01c))
+* Unify extraction and support single-file compressed artifacts ([e7b03d7](https://github.com/vi-dev/nem-cli/commit/e7b03d78eeb46bd7407f30282a46fa6b829bdfb6))
+
+
+### Bug Fixes
+
+* Confine not-installed warnings to `nem status` ([7c255cd](https://github.com/vi-dev/nem-cli/commit/7c255cd86e2bea1a478653b00c09d01487108c8e))
+* Consult docker credential helpers only for stored logins ([b732841](https://github.com/vi-dev/nem-cli/commit/b732841719a4f5fe3265e09914a2b0e8cad08ada))
+* Keep pinned tools when unconstrained deps float to latest ([c028d29](https://github.com/vi-dev/nem-cli/commit/c028d29e26c26669ff74c292c324030e6ac3d365))
+* Show composed environment in nem status ([6f3dab3](https://github.com/vi-dev/nem-cli/commit/6f3dab3d3014aaf86d74f59b96df0ab599c1d0d2))
+* Take a bare repository ref in catalog publish ([0800696](https://github.com/vi-dev/nem-cli/commit/0800696653ba9c5bb4386d75c6184519e339a248))
+
+
+### Refactors
+
+* Apply cleanups across fetch, publish, and bump ([4d3cc7f](https://github.com/vi-dev/nem-cli/commit/4d3cc7f538d675aae52174819100bc4552a9d35c))
+* Route all terminal output through report.Console ([703fb36](https://github.com/vi-dev/nem-cli/commit/703fb362b7fc0d3e8c40aaba47c37c0ce218607d))
+
 ## [0.1.1](https://github.com/vi-dev/nem-cli/compare/v0.1.0...v0.1.1) (2026-08-14)
 
 
