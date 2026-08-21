@@ -48,12 +48,22 @@ type VersionEntry struct {
 // Discovery configures automatic version discovery for a package.
 type Discovery struct {
 	GitHub *GitHubDiscovery
+	GitLab *GitLabDiscovery
+	Git    *GitDiscovery
 	OCI    string
 }
 
 // GitHubDiscovery discovers versions from GitHub tags: filter regex on raw
 // tag names, then the prefix and suffix are stripped.
 type GitHubDiscovery struct{ Repo, Filter, Prefix, Suffix string }
+
+// GitLabDiscovery discovers versions from a gitlab.com project's tags;
+// same tag handling as GitHubDiscovery.
+type GitLabDiscovery struct{ Repo, Filter, Prefix, Suffix string }
+
+// GitDiscovery discovers versions from the tags of any git repository
+// served over smart HTTP; URL is the clone URL.
+type GitDiscovery struct{ URL, Filter, Prefix, Suffix string }
 
 // Artifact is the download source for a package's versions.
 type Artifact struct {

@@ -90,6 +90,61 @@ versions:
 	}
 }
 
+func TestParseGitLabDiscovery(t *testing.T) {
+	y := `
+schema: 2
+name: glab
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+versionDiscovery:
+  gitlab:
+    repo: gitlab-org/cli
+    filter: '^v\d+\.\d+\.\d+$'
+    prefix: "v"
+    suffix: "-x"
+`
+	p, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	g := p.VersionDiscovery.GitLab
+	if g == nil || g.Repo != "gitlab-org/cli" || g.Filter != `^v\d+\.\d+\.\d+$` ||
+		g.Prefix != "v" || g.Suffix != "-x" {
+		t.Fatalf("gitlab discovery: %+v", g)
+	}
+}
+
+func TestParseGitDiscovery(t *testing.T) {
+	y := `
+schema: 2
+name: tiny
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+versionDiscovery:
+  git:
+    url: https://gitlab.example.com/group/project.git
+    filter: '^v\d+\.\d+\.\d+$'
+    prefix: "v"
+`
+	p, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	g := p.VersionDiscovery.Git
+	if g == nil || g.URL != "https://gitlab.example.com/group/project.git" ||
+		g.Filter != `^v\d+\.\d+\.\d+$` || g.Prefix != "v" || g.Suffix != "" {
+		t.Fatalf("git discovery: %+v", g)
+	}
+}
+
 func TestParseRejectsScalarSha256(t *testing.T) {
 	y := `
 schema: 2

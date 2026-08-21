@@ -61,6 +61,27 @@ func TestValidateRules(t *testing.T) {
 		{"bad filter", func(p *Package) {
 			p.VersionDiscovery = &Discovery{GitHub: &GitHubDiscovery{Repo: "a/b", Filter: "("}}
 		}, "filter"},
+		{"gitlab and oci discovery", func(p *Package) {
+			p.VersionDiscovery = &Discovery{GitLab: &GitLabDiscovery{Repo: "a/b"}, OCI: "x"}
+		}, "versionDiscovery"},
+		{"bad gitlab filter", func(p *Package) {
+			p.VersionDiscovery = &Discovery{GitLab: &GitLabDiscovery{Repo: "a/b", Filter: "("}}
+		}, "filter"},
+		{"bad git filter", func(p *Package) {
+			p.VersionDiscovery = &Discovery{Git: &GitDiscovery{URL: "https://e.com/a/b.git", Filter: "("}}
+		}, "filter"},
+		{"github without repo", func(p *Package) {
+			p.VersionDiscovery = &Discovery{GitHub: &GitHubDiscovery{}}
+		}, "repo"},
+		{"gitlab without repo", func(p *Package) {
+			p.VersionDiscovery = &Discovery{GitLab: &GitLabDiscovery{}}
+		}, "repo"},
+		{"git without url", func(p *Package) {
+			p.VersionDiscovery = &Discovery{Git: &GitDiscovery{}}
+		}, "url"},
+		{"git url not http", func(p *Package) {
+			p.VersionDiscovery = &Discovery{Git: &GitDiscovery{URL: "ssh://e.com/a/b.git"}}
+		}, "url"},
 		{"bad dep name", func(p *Package) {
 			p.Deps = []Dep{{Name: "Bad"}}
 		}, "dep"},
@@ -89,6 +110,22 @@ func TestValidateRules(t *testing.T) {
 		err := p.Validate()
 		if err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: got %v, want mention of %q", c.name, err, c.want)
+		}
+	}
+}
+
+func TestValidateDiscoverySourcesOK(t *testing.T) {
+	sources := []Discovery{
+		{GitHub: &GitHubDiscovery{Repo: "a/b", Filter: `^v`, Prefix: "v"}},
+		{GitLab: &GitLabDiscovery{Repo: "a/b/c", Filter: `^v`, Prefix: "v"}},
+		{Git: &GitDiscovery{URL: "https://e.com/a/b.git", Filter: `^v`}},
+		{OCI: "ghcr.io/x/y"},
+	}
+	for _, d := range sources {
+		p := valid()
+		p.VersionDiscovery = &d
+		if err := p.Validate(); err != nil {
+			t.Errorf("discovery %+v rejected: %v", d, err)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package spec
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
 )
 
@@ -33,6 +34,17 @@ func (p *Package) SupportedBy() []Platform {
 		}
 	}
 	return out
+}
+
+func validateHTTPURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("must be an http(s) URL, got %q", s)
+	}
+	return nil
 }
 
 // Validate checks schema rules beyond YAML shape. First violation wins.
@@ -105,18 +117,36 @@ func (p *Package) Validate() error {
 		}
 	}
 	if d := p.VersionDiscovery; d != nil {
-		sources := 0
+		sources, filter := 0, ""
 		if d.GitHub != nil {
 			sources++
+			filter = d.GitHub.Filter
+			if d.GitHub.Repo == "" {
+				return errors.New("versionDiscovery github requires repo")
+			}
+		}
+		if d.GitLab != nil {
+			sources++
+			filter = d.GitLab.Filter
+			if d.GitLab.Repo == "" {
+				return errors.New("versionDiscovery gitlab requires repo")
+			}
+		}
+		if d.Git != nil {
+			sources++
+			filter = d.Git.Filter
+			if err := validateHTTPURL(d.Git.URL); err != nil {
+				return fmt.Errorf("versionDiscovery git url: %w", err)
+			}
 		}
 		if d.OCI != "" {
 			sources++
 		}
 		if sources != 1 {
-			return errors.New("versionDiscovery must set exactly one of github, oci")
+			return errors.New("versionDiscovery must set exactly one of github, gitlab, git, oci")
 		}
-		if d.GitHub != nil && d.GitHub.Filter != "" {
-			if _, err := regexp.Compile(d.GitHub.Filter); err != nil {
+		if filter != "" {
+			if _, err := regexp.Compile(filter); err != nil {
 				return fmt.Errorf("versionDiscovery filter: %w", err)
 			}
 		}

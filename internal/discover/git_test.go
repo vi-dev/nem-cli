@@ -110,6 +110,62 @@ func TestGithubVersions(t *testing.T) {
 	}
 }
 
+func TestGitVersions(t *testing.T) {
+	adv := advertisement(
+		oid+" HEAD\x00symref=HEAD:refs/heads/main\n",
+		oid+" refs/tags/v1.98.0\n",
+		oid+" refs/tags/v1.99.0\n",
+		oid+" refs/tags/nightly\n",
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/group/sub/project.git/info/refs" || r.URL.Query().Get("service") != "git-upload-pack" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, adv)
+	}))
+	defer srv.Close()
+
+	got, err := gitVersions(context.Background(), srv.Client(),
+		srv.URL+"/group/sub/project.git", `^v\d+\.\d+\.\d+$`, "v", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1.98.0", "1.99.0"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("versions = %v, want %v", got, want)
+	}
+}
+
+func TestGitlabVersions(t *testing.T) {
+	adv := advertisement(
+		oid+" HEAD\x00symref=HEAD:refs/heads/main\n",
+		oid+" refs/tags/v1.98.0\n",
+		oid+" refs/tags/v1.99.0\n",
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/gitlab-org/cli.git/info/refs" || r.URL.Query().Get("service") != "git-upload-pack" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprint(w, adv)
+	}))
+	defer srv.Close()
+	restore := gitlabBase
+	gitlabBase = srv.URL
+	defer func() { gitlabBase = restore }()
+
+	got, err := gitlabVersions(context.Background(), srv.Client(),
+		&spec.GitLabDiscovery{Repo: "gitlab-org/cli", Filter: `^v\d+\.\d+\.\d+$`, Prefix: "v"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1.98.0", "1.99.0"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("versions = %v, want %v", got, want)
+	}
+}
+
 func TestGithubVersionsHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusForbidden)

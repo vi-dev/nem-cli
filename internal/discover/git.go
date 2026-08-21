@@ -60,43 +60,57 @@ func parseAdvertisement(r io.Reader) ([]string, error) {
 	}
 }
 
-// githubBase is the host serving git smart-HTTP; a var so tests can
-// point it at a local server.
-var githubBase = "https://github.com"
+// githubBase and gitlabBase are the hosts serving git smart-HTTP; vars so
+// tests can point them at a local server.
+var (
+	githubBase = "https://github.com"
+	gitlabBase = "https://gitlab.com"
+)
 
-// githubVersions lists g.Repo's tags and derives versions: filter regex
-// on raw tag names, strip the prefix and suffix, respell to the OCI tag grammar.
+// githubVersions lists g.Repo's tags and derives versions.
 func githubVersions(ctx context.Context, client *http.Client, g *spec.GitHubDiscovery) ([]string, error) {
+	return gitVersions(ctx, client, githubBase+"/"+g.Repo+".git", g.Filter, g.Prefix, g.Suffix)
+}
+
+// gitlabVersions lists g.Repo's tags and derives versions.
+func gitlabVersions(ctx context.Context, client *http.Client, g *spec.GitLabDiscovery) ([]string, error) {
+	return gitVersions(ctx, client, gitlabBase+"/"+g.Repo+".git", g.Filter, g.Prefix, g.Suffix)
+}
+
+// gitVersions lists the tags of the git repository cloned from repoURL
+// (smart HTTP) and derives versions: filter regex on raw tag names, strip
+// the prefix and suffix, respell to the OCI tag grammar.
+func gitVersions(ctx context.Context, client *http.Client, repoURL, filter, prefix, suffix string) ([]string, error) {
 	var re *regexp.Regexp
-	if g.Filter != "" {
+	if filter != "" {
 		var err error
-		if re, err = regexp.Compile(g.Filter); err != nil {
+		if re, err = regexp.Compile(filter); err != nil {
 			return nil, fmt.Errorf("discovery filter: %w", err)
 		}
 	}
-	url := fmt.Sprintf("%s/%s.git/info/refs?service=git-upload-pack", githubBase, g.Repo)
+	url := strings.TrimSuffix(repoURL, "/") + "/info/refs?service=git-upload-pack"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request for %s: %w", url, err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("list tags for %s: %w", g.Repo, err)
+		return nil, fmt.Errorf("list tags for %s: %w", repoURL, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("list tags for %s: unexpected status %s", g.Repo, resp.Status)
+		return nil, fmt.Errorf("list tags for %s: unexpected status %s", repoURL, resp.Status)
 	}
 	tags, err := parseAdvertisement(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("list tags for %s: %w", g.Repo, err)
+		return nil, fmt.Errorf("list tags for %s: %w", repoURL, err)
 	}
 	var out []string
 	for _, t := range tags {
 		if re != nil && !re.MatchString(t) {
 			continue
 		}
-		out = append(out, respell(strings.TrimSuffix(strings.TrimPrefix(t, g.Prefix), g.Suffix)))
+		out = append(out, respell(strings.TrimSuffix(strings.TrimPrefix(t, prefix), suffix)))
 	}
 	return out, nil
 }

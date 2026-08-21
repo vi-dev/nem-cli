@@ -20,6 +20,10 @@ func List(ctx context.Context, pkg *spec.Package) ([]string, error) {
 		return nil, fmt.Errorf("%s has no versionDiscovery", pkg.Name)
 	case d.GitHub != nil:
 		return githubVersions(ctx, http.DefaultClient, d.GitHub)
+	case d.GitLab != nil:
+		return gitlabVersions(ctx, http.DefaultClient, d.GitLab)
+	case d.Git != nil:
+		return gitVersions(ctx, http.DefaultClient, d.Git.URL, d.Git.Filter, d.Git.Prefix, d.Git.Suffix)
 	case d.OCI != "":
 		return ociTags(ctx, d.OCI)
 	}

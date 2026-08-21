@@ -35,6 +35,8 @@ type rawDep struct {
 
 type rawDiscovery struct {
 	GitHub *GitHubDiscovery `yaml:"github"`
+	GitLab *GitLabDiscovery `yaml:"gitlab"`
+	Git    *GitDiscovery    `yaml:"git"`
 	OCI    string           `yaml:"oci"`
 }
 
@@ -96,7 +98,12 @@ func Parse(data []byte) (*Package, error) {
 		p.Deps = append(p.Deps, dep)
 	}
 	if raw.VersionDiscovery != nil {
-		p.VersionDiscovery = &Discovery{GitHub: raw.VersionDiscovery.GitHub, OCI: raw.VersionDiscovery.OCI}
+		p.VersionDiscovery = &Discovery{
+			GitHub: raw.VersionDiscovery.GitHub,
+			GitLab: raw.VersionDiscovery.GitLab,
+			Git:    raw.VersionDiscovery.Git,
+			OCI:    raw.VersionDiscovery.OCI,
+		}
 	}
 	p.Artifact = Artifact{URL: raw.Artifact.URL, GitHub: raw.Artifact.GitHub, OCI: raw.Artifact.OCI}
 	for i, m := range raw.Install {
