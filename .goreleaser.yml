@@ -54,6 +54,26 @@ dockers_v2:
       org.opencontainers.image.licenses: MPL-2.0
       org.opencontainers.image.description: "Manage your development environment"
 
+  - id: nem-rootless
+    images:
+      - ghcr.io/vi-dev/nem-cli
+    tags:
+      - "v{{ .Version }}-rootless"
+      - "{{ if eq .Prerelease \"\" }}v{{ .Major }}.{{ .Minor }}-rootless{{ end }}"
+      - "{{ if eq .Prerelease \"\" }}v{{ .Major }}-rootless{{ end }}"
+      - "{{ if eq .Prerelease \"\" }}rootless{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.rootless
+    sbom: true
+    labels:
+      org.opencontainers.image.source: https://github.com/vi-dev/nem-cli
+      org.opencontainers.image.version: "v{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MPL-2.0
+      org.opencontainers.image.description: "Manage your development environment (rootless runtime image)"
+
 docker_signs:
   - id: ghcr-cosign
     cmd: cosign

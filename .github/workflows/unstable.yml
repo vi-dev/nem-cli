@@ -60,6 +60,10 @@ jobs:
           docker run --rm --entrypoint sh ghcr.io/vi-dev/nem-cli:unstable -c \
             'command -v cc && command -v make && command -v perl && command -v ar \
              && command -v bzip2 && command -v xz && [ "$NEM_HOME" = "/root/.nem" ]'
+          docker pull ghcr.io/vi-dev/nem-cli:unstable-rootless
+          docker run --rm ghcr.io/vi-dev/nem-cli:unstable-rootless version
+          docker run --rm --entrypoint sh ghcr.io/vi-dev/nem-cli:unstable-rootless -c \
+            '[ "$(id -u)" = "1000" ] && [ "$NEM_HOME" = "/home/nem/.nem" ]'
 
       - name: Publish rolling unstable release
         env:

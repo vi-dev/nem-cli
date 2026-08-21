@@ -1,0 +1,29 @@
+# Pinned by digest. Update with:
+#   docker buildx imagetools inspect debian:bookworm-slim --format '{{.Manifest.Digest}}'
+FROM debian:bookworm-slim@sha256:abd67ffcfa541b485a3dff59865ab629aa048a6c613e639d36e7456b0b229241
+
+# Runtime-only variant for consuming catalogs (`nem sync` / `nem exec`).
+# No build toolchain: `nem catalog build` of source packages needs the root
+# image. Archive extraction is pure Go, so only TLS roots are required.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# goreleaser dockers_v2 places pre-built binaries in <TARGETPLATFORM>/nem
+# within the build context (e.g. linux/amd64/nem, linux/arm64/nem).
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/nem /usr/local/bin/nem
+
+# uid/gid 1000 matches the default user on typical CI runners, so files
+# written into a bind-mounted /work are not foreign-owned on the host.
+RUN groupadd --gid 1000 nem \
+    && useradd --uid 1000 --gid nem --create-home --shell /bin/bash nem \
+    && mkdir /work \
+    && chown nem:nem /work
+
+USER nem
+ENV NEM_HOME=/home/nem/.nem
+WORKDIR /work
+ENTRYPOINT ["nem"]
+CMD ["--help"]

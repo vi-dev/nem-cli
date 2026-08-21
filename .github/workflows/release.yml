@@ -65,29 +65,47 @@ jobs:
           docker run --rm --entrypoint sh "ghcr.io/vi-dev/nem-cli:${TAG}" -c \
             'command -v cc && command -v make && command -v perl && command -v ar \
              && command -v bzip2 && command -v xz && [ "$NEM_HOME" = "/root/.nem" ]'
+          docker pull "ghcr.io/vi-dev/nem-cli:${TAG}-rootless"
+          docker run --rm "ghcr.io/vi-dev/nem-cli:${TAG}-rootless" version
+          docker run --rm --entrypoint sh "ghcr.io/vi-dev/nem-cli:${TAG}-rootless" -c \
+            '[ "$(id -u)" = "1000" ] && [ "$NEM_HOME" = "/home/nem/.nem" ]'
 
-      # dockers_v2 publishes one manifest under several tags, so digests.txt
-      # lists a subject per tag. push-to-registry attaches provenance to a
-      # single image, so collapse them to the digest they all share.
-      - name: Resolve image digest
+      # dockers_v2 publishes two manifests (root + rootless) under several tags
+      # each, so digests.txt lists a subject per tag. push-to-registry attaches
+      # provenance to a single image, so resolve each variant's digest from the
+      # registry and check digests.txt contains exactly those two.
+      - name: Resolve image digests
         id: image
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           cat dist/digests.txt
-          digests="$(awk '{print $1}' dist/digests.txt | sed 's/^sha256://' | sort -u)"
-          count="$(printf '%s\n' "${digests}" | grep -c .)"
-          if [ "${count}" -ne 1 ]; then
-            echo "expected one manifest digest across all tags, got ${count}:" >&2
-            printf '%s\n' "${digests}" >&2
+          root="$(docker buildx imagetools inspect "ghcr.io/vi-dev/nem-cli:${TAG}" --format '{{.Manifest.Digest}}')"
+          rootless="$(docker buildx imagetools inspect "ghcr.io/vi-dev/nem-cli:${TAG}-rootless" --format '{{.Manifest.Digest}}')"
+          published="$(awk '{print $1}' dist/digests.txt | sort -u)"
+          expected="$(printf '%s\n%s\n' "${root}" "${rootless}" | sort -u)"
+          if [ "${published}" != "${expected}" ]; then
+            echo "digests.txt does not match the two pushed manifests:" >&2
+            echo "digests.txt: ${published}" >&2
+            echo "registry:    ${expected}" >&2
             exit 1
           fi
-          echo "digest=sha256:${digests}" >> "$GITHUB_OUTPUT"
+          echo "digest=${root}" >> "$GITHUB_OUTPUT"
+          echo "rootless_digest=${rootless}" >> "$GITHUB_OUTPUT"
 
       - name: Attest container image
         uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6  # v4
         with:
           subject-name: ghcr.io/vi-dev/nem-cli
           subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest rootless container image
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6  # v4
+        with:
+          subject-name: ghcr.io/vi-dev/nem-cli
+          subject-digest: ${{ steps.image.outputs.rootless_digest }}
           push-to-registry: true
 
       - name: Attest release archives

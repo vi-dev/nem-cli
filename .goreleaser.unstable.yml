@@ -53,6 +53,22 @@ dockers_v2:
       org.opencontainers.image.licenses: MPL-2.0
       org.opencontainers.image.description: "Manage your development environment (unstable build from main)"
 
+  - id: nem-rootless
+    images:
+      - ghcr.io/vi-dev/nem-cli
+    tags:
+      - "unstable-rootless"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    dockerfile: Dockerfile.rootless
+    labels:
+      org.opencontainers.image.source: https://github.com/vi-dev/nem-cli
+      org.opencontainers.image.version: "unstable"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.licenses: MPL-2.0
+      org.opencontainers.image.description: "Manage your development environment (unstable build from main, rootless runtime image)"
+
 changelog:
   disable: true
 

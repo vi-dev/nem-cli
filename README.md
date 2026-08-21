@@ -129,6 +129,13 @@ Stable releases are tagged `vX.Y.Z`, `vX.Y`, `vX`, and `latest`; the
 `unstable` tag tracks `main`. The image carries a build toolchain so
 `nem catalog build` works inside it.
 
+Every tag has a `-rootless` companion (`vX.Y.Z-rootless`, …, `rootless`,
+`unstable-rootless`): a slimmer runtime image that runs as the non-root user
+`nem` (uid 1000). It is meant for consuming catalogs — e.g. as a base image
+for CI jobs or dev containers that `nem sync` a project and run tools with
+`nem exec` — and carries no build toolchain, so `nem catalog build` of
+source-built packages does not work there.
+
 ## Contributing
 
 Please open an issue to discuss substantial changes before sending a pull
