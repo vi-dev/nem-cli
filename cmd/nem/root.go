@@ -70,7 +70,7 @@ func newRoot() *cobra.Command {
 	addGrouped(root, groupDiscovery, newSearchCmd(), newInfoCmd())
 	addGrouped(root, groupCatalogs, newCatalogCmd())
 	addGrouped(root, groupShell, newActivateCmd(), newDeactivateCmd(), newEnvCmd())
-	addGrouped(root, groupMaintenance, newCleanCmd())
+	addGrouped(root, groupMaintenance, newCleanCmd(), newSelfCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }

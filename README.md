@@ -71,6 +71,19 @@ curl -fsSL https://raw.githubusercontent.com/vi-dev/nem-cli/main/install.sh | NE
 Prebuilt binaries for Linux and macOS are also attached to every
 [GitHub release](https://github.com/vi-dev/nem-cli/releases).
 
+### Updating
+
+An installed `nem` updates itself:
+
+```shell
+nem self update             # latest stable release
+nem self update --check     # only report whether an update is available
+nem self update --version v0.1.0
+```
+
+The update is checksum-verified and the new binary is test-run before it
+replaces the old one.
+
 > [!NOTE]
 > On first run, `nem` configures the official package catalog,
 > [`ghcr.io/vi-dev/nem-official-catalog`](https://github.com/vi-dev/nem-official-catalog).
@@ -100,6 +113,7 @@ Every command supports `--help`. The main ones:
 | `nem env` / `nem exec` | Print or run a command in the composed environment |
 | `nem catalog` | Manage catalogs: add, list, remove, update, reorder, enable, disable, build, lint, publish |
 | `nem clean` | Reclaim disk space in NEM_HOME |
+| `nem self update` | Update nem itself to the latest release |
 
 ## Container image
 
