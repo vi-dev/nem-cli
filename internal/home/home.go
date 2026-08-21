@@ -30,6 +30,22 @@ func (h Home) GlobalManifest() string { return filepath.Join(h.root, "nem.toml")
 func (h Home) GlobalLock() string     { return filepath.Join(h.root, "nem.lock") }
 func (h Home) LockFile() string       { return filepath.Join(h.root, "lock") }
 func (h Home) Tmp() string            { return filepath.Join(h.root, "tmp") }
+func (h Home) Usage() string          { return filepath.Join(h.root, "usage.json") }
+
+// Packages returns $NEM_HOME/packages, the parent of every install dir
+// PackageDir names.
+func (h Home) Packages() string { return filepath.Join(h.root, "packages") }
+
+// TmpSuffix marks a path as not yet ready to use: internal/fetch names a
+// download's temp file with it, and internal/install names an install's
+// staging directory with it, both via os.CreateTemp/os.MkdirTemp patterns
+// ending in "-*"+TmpSuffix.
+const TmpSuffix = ".tmp"
+
+// BuildStagingInfix names a build's staging directory under Tmp():
+// internal/build creates it via
+// os.MkdirTemp(h.Tmp(), pkg.Name+BuildStagingInfix+"*").
+const BuildStagingInfix = "-build-"
 
 // segmentRE matches a single path segment safe to join under root: no
 // separator, and no leading dot (so ".." and hidden-file tricks are rejected
@@ -54,7 +70,7 @@ func (h Home) PackageDir(name, version string) (string, error) {
 	if err := safeSegment(version); err != nil {
 		return "", err
 	}
-	return filepath.Join(h.root, "packages", name, version), nil
+	return filepath.Join(h.Packages(), name, version), nil
 }
 
 // CatalogStore returns the local OCI-layout mirror path for the named

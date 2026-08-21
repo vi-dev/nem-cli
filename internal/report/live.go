@@ -171,14 +171,14 @@ func progressText(done, total int64, cdone, ctotal int) string {
 	case total > 0:
 		return fmt.Sprintf("%d%%", int(float64(done)/float64(total)*100))
 	case total < 0:
-		return formatBytes(done)
+		return FormatBytes(done)
 	default:
 		return ""
 	}
 }
 
-// formatBytes renders n bytes as a short human count, e.g. "12 MB".
-func formatBytes(n int64) string {
+// FormatBytes renders n bytes as a short human count, e.g. "12 MB".
+func FormatBytes(n int64) string {
 	const unit = 1024
 	if n < unit {
 		return fmt.Sprintf("%d B", n)

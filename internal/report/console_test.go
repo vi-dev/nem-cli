@@ -124,6 +124,17 @@ func TestDataIgnoresQuiet(t *testing.T) {
 	}
 }
 
+func TestPromptIgnoresQuiet(t *testing.T) {
+	c, out, errb := newTest(Options{Quiet: true, Color: ColorNever})
+	c.Prompt("Remove these? [y/N]: ")
+	if errb.String() != "Remove these? [y/N]: \n" {
+		t.Errorf("quiet suppressed a question the command blocks on: %q", errb.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("prompt leaked to stdout: %q", out.String())
+	}
+}
+
 func TestDataNeverColored(t *testing.T) {
 	c, out, _ := newTest(Options{Color: ColorAlways})
 	c.Data("plain\n")

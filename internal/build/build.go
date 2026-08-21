@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"oras.land/oras-go/v2/content"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/resolve"
 	"github.com/vi-dev/nem-cli/internal/spec"
+	"github.com/vi-dev/nem-cli/internal/usage"
 )
 
 // Options tailors one Build invocation.
@@ -65,7 +67,7 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 	if err := os.MkdirAll(h.Tmp(), 0o755); err != nil {
 		return Result{}, fmt.Errorf("create tmp dir: %w", err)
 	}
-	staging, err := os.MkdirTemp(h.Tmp(), pkg.Name+"-build-*")
+	staging, err := os.MkdirTemp(h.Tmp(), pkg.Name+home.BuildStagingInfix+"*")
 	if err != nil {
 		return Result{}, fmt.Errorf("create staging dir: %w", err)
 	}
@@ -133,7 +135,7 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, err
 	}
 
-	packagesRoot := filepath.Join(h.Root(), "packages")
+	packagesRoot := h.Packages()
 	vs, err := VerifyConformance(final, []string{staging, packagesRoot})
 	if err != nil {
 		return Result{}, fmt.Errorf("verify %s: %w", final, err)
@@ -151,6 +153,15 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		result.Pushed = pushed
 		result.PushedRef = ref
 	}
+	// The built package's own row outlives every clean run: clean prunes
+	// only the rows whose version directory it deleted, and a build output
+	// never lands in packages/. It is dropped once that version is
+	// installed and later evicted.
+	keys := []string{usage.Key(pkg.Name, version)}
+	for _, d := range deps {
+		keys = append(keys, usage.Key(d.Name, d.Version))
+	}
+	usage.Stamp(h, time.Now(), keys)
 	return result, nil
 }
 

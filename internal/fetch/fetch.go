@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -60,7 +61,7 @@ func DownloadUnverified(ctx context.Context, client *http.Client, url, dir strin
 	}
 	defer resp.Body.Close()
 
-	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*.tmp")
+	f, err := os.CreateTemp(dir, meta.Name+"-"+meta.Version+"-*"+home.TmpSuffix)
 	if err != nil {
 		return "", "", fmt.Errorf("create temp file in %s: %w", dir, err)
 	}

@@ -3,6 +3,8 @@ package build
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,15 +12,18 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/oci"
 
+	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
+	"github.com/vi-dev/nem-cli/internal/usage"
 )
 
 func TestBuildRunsStepsAndVerifies(t *testing.T) {
@@ -241,5 +246,117 @@ func TestBuildDryRunPushesNothing(t *testing.T) {
 
 	if _, err := ocix.PullArchiveFrom(context.Background(), store, "v1.0.0", spec.Current(), t.TempDir()); !errors.Is(err, ocix.ErrArchiveNotFound) {
 		t.Fatalf("dry-run pushed something: pull err = %v, want %v", err, ocix.ErrArchiveNotFound)
+	}
+}
+
+// depDirCatalog writes a one-package dir catalog whose sole package
+// downloads depArchive from an httptest server, its sha256 pinned for
+// every supported platform so spec.Validate accepts it.
+func depDirCatalog(t *testing.T, name, version string, depArchive []byte) string {
+	t.Helper()
+	sum := sha256.Sum256(depArchive)
+	sha := hex.EncodeToString(sum[:])
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(depArchive) }))
+	t.Cleanup(srv.Close)
+
+	root := t.TempDir()
+	dir := filepath.Join(root, "pkgs", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	yaml := `
+schema: 2
+name: ` + name + `
+artifact:
+  url: "` + srv.URL + `"
+install:
+  - extract: {}
+libs: ["lib"]
+versions:
+  - version: "` + version + `"
+    sha256:
+      darwin/arm64: "` + sha + `"
+      darwin/amd64: "` + sha + `"
+      linux/arm64: "` + sha + `"
+      linux/amd64: "` + sha + `"
+`
+	if err := os.WriteFile(filepath.Join(dir, "pkg.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatalf("write dep pkg.yaml: %v", err)
+	}
+	return root
+}
+
+// TestBuildRestampsAlreadyInstalledBuildDep guards the case a same-key
+// assertion right after a fresh install can't distinguish: install.Install
+// already stamps a build dep the first time install.Run installs it, so a
+// naive "the dep's key is present after Build" check would pass even if
+// Build itself never stamped deps. Here the dep is pre-installed and its
+// stamp backdated past Stamp's debounce window before Build runs, so only
+// Build's own stamp — not install's — can explain the refreshed timestamp.
+func TestBuildRestampsAlreadyInstalledBuildDep(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return nemHomeDir
+		}
+		return ""
+	})
+
+	depArchive := makeTarGz(t, map[string]string{"lib/libdep.so": "dep bytes"})
+	catalogRoot := depDirCatalog(t, "dep", "9.9.9", depArchive)
+	sources := []catalog.Named{{Name: "cat", Source: catalog.NewDir(catalogRoot)}}
+
+	depPkg, _, err := catalog.NewDir(catalogRoot).Load(context.Background(), "dep")
+	if err != nil {
+		t.Fatalf("load dep pkg: %v", err)
+	}
+	artifactPath := filepath.Join(t.TempDir(), "dep.tar.gz")
+	if err := os.WriteFile(artifactPath, depArchive, 0o644); err != nil {
+		t.Fatalf("write dep artifact: %v", err)
+	}
+	if err := install.Install(context.Background(), h, depPkg, "9.9.9", "cat", artifactPath); err != nil {
+		t.Fatalf("pre-install dep: %v", err)
+	}
+
+	old := time.Now().Add(-2 * time.Hour)
+	idx := usage.Load(h)
+	idx[usage.Key("dep", "9.9.9")] = old
+	if err := usage.Save(h, idx); err != nil {
+		t.Fatalf("backdate dep stamp: %v", err)
+	}
+
+	srcTgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(srcTgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "consumer",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1.0.0"}},
+		Build: &spec.Build{
+			Output: "out",
+			Deps:   []spec.Dep{{Name: "dep", Version: "9.9.9"}},
+			Steps: []spec.BuildStep{
+				{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hi > "$NEM_OUTPUT/bin/consumer"`},
+			},
+		}}
+	pkg.Build.Source.URL = srv.URL
+
+	var out, errb bytes.Buffer
+	if _, err := Build(context.Background(), h, nil, sources, pkg, Options{Version: "v1.0.0"},
+		report.New(&out, &errb, report.Options{}), &out, &errb); err != nil {
+		t.Fatalf("Build: %v\n%s", err, errb.String())
+	}
+
+	got := usage.Load(h)
+	if _, ok := got.LastUsed("consumer", "v1.0.0"); !ok {
+		t.Error("built package was not stamped")
+	}
+	depStamp, ok := got.LastUsed("dep", "9.9.9")
+	if !ok {
+		t.Fatal("dep stamp missing after build")
+	}
+	if !depStamp.After(old) {
+		t.Fatalf("build did not refresh an already-installed dep's stamp: got %v, want after %v", depStamp, old)
 	}
 }

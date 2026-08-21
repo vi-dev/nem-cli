@@ -99,6 +99,7 @@ Every command supports `--help`. The main ones:
 | `nem which <tool>...` | Show where a tool resolves in the composed environment |
 | `nem env` / `nem exec` | Print or run a command in the composed environment |
 | `nem catalog` | Manage catalogs: add, list, remove, update, reorder, enable, disable, build, lint, publish |
+| `nem clean` | Reclaim disk space in NEM_HOME |
 
 ## Container image
 

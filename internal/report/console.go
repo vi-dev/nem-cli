@@ -161,6 +161,13 @@ func (c *Console) Hint(msg string) {
 	}
 }
 
+// Prompt writes an interactive question to stderr. Unlike narration it is
+// never suppressed by Quiet: the command blocks on the answer, so a hidden
+// question is indistinguishable from a hang.
+func (c *Console) Prompt(format string, a ...any) {
+	c.narrate(func() { fmt.Fprintf(c.err, format+"\n", a...) })
+}
+
 // Data writes the command's machine-consumable product to stdout: never
 // colored, never suppressed by Quiet, and verbatim — unlike narration
 // methods it appends no newline, so callers include their own. Like Table

@@ -64,11 +64,13 @@ func newRoot() *cobra.Command {
 		&cobra.Group{ID: groupDiscovery, Title: "Discovery:"},
 		&cobra.Group{ID: groupCatalogs, Title: "Catalogs:"},
 		&cobra.Group{ID: groupShell, Title: "Shell integration:"},
+		&cobra.Group{ID: groupMaintenance, Title: "Maintenance:"},
 	)
 	addGrouped(root, groupEnvironment, newUseCmd(), newUnuseCmd(), newLockCmd(), newSyncCmd(), newStatusCmd(), newExecCmd(), newWhichCmd())
 	addGrouped(root, groupDiscovery, newSearchCmd(), newInfoCmd())
 	addGrouped(root, groupCatalogs, newCatalogCmd())
 	addGrouped(root, groupShell, newActivateCmd(), newDeactivateCmd(), newEnvCmd())
+	addGrouped(root, groupMaintenance, newCleanCmd())
 	root.AddCommand(newVersionCmd())
 	return root
 }
@@ -78,6 +80,7 @@ const (
 	groupDiscovery   = "discovery"
 	groupCatalogs    = "catalogs"
 	groupShell       = "shell"
+	groupMaintenance = "maintenance"
 )
 
 // addGrouped registers cmds under parent with the given help group. The

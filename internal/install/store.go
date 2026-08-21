@@ -12,6 +12,7 @@ import (
 
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/spec"
+	"github.com/vi-dev/nem-cli/internal/usage"
 )
 
 // metaFileName is the sidecar Install writes into every install dir.
@@ -58,7 +59,7 @@ func Install(ctx context.Context, h home.Home, pkg *spec.Package, version, catal
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("create packages dir: %w", err)
 	}
-	staging, err := os.MkdirTemp(parent, version+"-*.tmp")
+	staging, err := os.MkdirTemp(parent, version+"-*"+home.TmpSuffix)
 	if err != nil {
 		return fmt.Errorf("create staging dir: %w", err)
 	}
@@ -85,6 +86,7 @@ func Install(ctx context.Context, h home.Home, pkg *spec.Package, version, catal
 		return fmt.Errorf("commit %s@%s: %w", pkg.Name, version, err)
 	}
 	committed = true
+	usage.Stamp(h, time.Now(), []string{usage.Key(pkg.Name, version)})
 	return nil
 }
 

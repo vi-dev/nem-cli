@@ -325,6 +325,44 @@ func TestStatusScopesDoNotMerge(t *testing.T) {
 	}
 }
 
+func TestStatusDoesNotStampUsage(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.toml"),
+		[]byte("[tools]\ntool = \"1.0.0\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "nem.lock"), []byte(
+		"# machine-written by nem — do not edit\nversion = 1\n\n"+
+			"[[package]]\nname = \"tool\"\nversion = \"1.0.0\"\ncatalog = \"c\"\ndirect = true\non_path = true\nplatforms = [\""+platformString()+"\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	toolDir := filepath.Join(nemHomeDir, "packages", "tool", "1.0.0")
+	writeMetaFile(t, toolDir, "package: tool\nversion: 1.0.0\ncatalog: c\nbins: [bin]\n")
+	chdir(t, t.TempDir()) // a directory with no nem.toml
+
+	usagePath := filepath.Join(nemHomeDir, "usage.json")
+	seeded := []byte(`{"other@9.9.9":"2026-08-20T12:00:00Z"}`)
+	if err := os.WriteFile(usagePath, seeded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errb, err := runNem(t, nemHomeDir, "status", "-g")
+	if err != nil {
+		t.Fatalf("status -g: %v\nstderr: %s", err, errb)
+	}
+	if !strings.Contains(out, "tool") {
+		t.Fatalf("status -g did not compose the tool row:\n%s", out)
+	}
+
+	got, err := os.ReadFile(usagePath)
+	if err != nil {
+		t.Fatalf("read usage.json: %v", err)
+	}
+	if string(got) != string(seeded) {
+		t.Fatalf("nem status modified usage.json: got %s, want %s", got, seeded)
+	}
+}
+
 func TestStatusNoManifestFails(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("NEM_HOME", filepath.Join(dir, "nemhome"))

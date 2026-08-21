@@ -6,11 +6,13 @@ import (
 	"sort"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/spec"
+	"github.com/vi-dev/nem-cli/internal/usage"
 )
 
 // Var is one composed environment variable. Source names where the final
@@ -43,6 +45,7 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 	warnings = append(warnings, w...)
 	resolvedGlobal, w := resolveEntries(orderedLockEntries(globalLock), metaLookup, h)
 	warnings = append(warnings, w...)
+	stampUsage(h, resolvedProject, resolvedGlobal)
 
 	path := buildPath(resolvedProject, resolvedGlobal)
 	loaderPath := buildLoaderPath(resolvedProject, resolvedGlobal)
@@ -115,6 +118,18 @@ func ComposeScope(scope, other *project.Manifest, scopeLock, otherLock *project.
 		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name], Source: sources[name]})
 	}
 	return result
+}
+
+// stampUsage records the versions a composition resolved. It runs on the
+// directory-change path, so it is deliberately best-effort and silent.
+func stampUsage(h home.Home, groups ...[]resolvedEntry) {
+	var keys []string
+	for _, g := range groups {
+		for _, r := range g {
+			keys = append(keys, usage.Key(r.name, r.version))
+		}
+	}
+	usage.Stamp(h, time.Now(), keys)
 }
 
 // resolvedEntry pairs a lock entry with its install metadata and absolute
