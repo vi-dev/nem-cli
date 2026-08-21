@@ -37,6 +37,7 @@ type rawDiscovery struct {
 	GitHub *GitHubDiscovery `yaml:"github"`
 	GitLab *GitLabDiscovery `yaml:"gitlab"`
 	Git    *GitDiscovery    `yaml:"git"`
+	HTTP   *HTTPDiscovery   `yaml:"http"`
 	OCI    string           `yaml:"oci"`
 }
 
@@ -102,6 +103,7 @@ func Parse(data []byte) (*Package, error) {
 			GitHub: raw.VersionDiscovery.GitHub,
 			GitLab: raw.VersionDiscovery.GitLab,
 			Git:    raw.VersionDiscovery.Git,
+			HTTP:   raw.VersionDiscovery.HTTP,
 			OCI:    raw.VersionDiscovery.OCI,
 		}
 	}

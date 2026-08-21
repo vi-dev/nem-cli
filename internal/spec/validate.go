@@ -139,11 +139,21 @@ func (p *Package) Validate() error {
 				return fmt.Errorf("versionDiscovery git url: %w", err)
 			}
 		}
+		if d.HTTP != nil {
+			sources++
+			filter = d.HTTP.Filter
+			if err := validateHTTPURL(d.HTTP.URL); err != nil {
+				return fmt.Errorf("versionDiscovery http url: %w", err)
+			}
+			if d.HTTP.Filter == "" {
+				return errors.New("versionDiscovery http requires filter")
+			}
+		}
 		if d.OCI != "" {
 			sources++
 		}
 		if sources != 1 {
-			return errors.New("versionDiscovery must set exactly one of github, gitlab, git, oci")
+			return errors.New("versionDiscovery must set exactly one of github, gitlab, git, http, oci")
 		}
 		if filter != "" {
 			if _, err := regexp.Compile(filter); err != nil {

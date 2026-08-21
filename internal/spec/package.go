@@ -50,6 +50,7 @@ type Discovery struct {
 	GitHub *GitHubDiscovery
 	GitLab *GitLabDiscovery
 	Git    *GitDiscovery
+	HTTP   *HTTPDiscovery
 	OCI    string
 }
 
@@ -64,6 +65,11 @@ type GitLabDiscovery struct{ Repo, Filter, Prefix, Suffix string }
 // GitDiscovery discovers versions from the tags of any git repository
 // served over smart HTTP; URL is the clone URL.
 type GitDiscovery struct{ URL, Filter, Prefix, Suffix string }
+
+// HTTPDiscovery discovers versions by fetching URL and matching Filter
+// against the body: each match's first capture group (or the full match
+// when the regex has no groups) is a version.
+type HTTPDiscovery struct{ URL, Filter string }
 
 // Artifact is the download source for a package's versions.
 type Artifact struct {

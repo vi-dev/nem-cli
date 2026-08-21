@@ -82,6 +82,18 @@ func TestValidateRules(t *testing.T) {
 		{"git url not http", func(p *Package) {
 			p.VersionDiscovery = &Discovery{Git: &GitDiscovery{URL: "ssh://e.com/a/b.git"}}
 		}, "url"},
+		{"http and oci discovery", func(p *Package) {
+			p.VersionDiscovery = &Discovery{HTTP: &HTTPDiscovery{URL: "https://e.com/dl/", Filter: `(\d+)`}, OCI: "x"}
+		}, "versionDiscovery"},
+		{"http without url", func(p *Package) {
+			p.VersionDiscovery = &Discovery{HTTP: &HTTPDiscovery{Filter: `(\d+)`}}
+		}, "url"},
+		{"http without filter", func(p *Package) {
+			p.VersionDiscovery = &Discovery{HTTP: &HTTPDiscovery{URL: "https://e.com/dl/"}}
+		}, "filter"},
+		{"bad http filter", func(p *Package) {
+			p.VersionDiscovery = &Discovery{HTTP: &HTTPDiscovery{URL: "https://e.com/dl/", Filter: "("}}
+		}, "filter"},
 		{"bad dep name", func(p *Package) {
 			p.Deps = []Dep{{Name: "Bad"}}
 		}, "dep"},
@@ -119,6 +131,7 @@ func TestValidateDiscoverySourcesOK(t *testing.T) {
 		{GitHub: &GitHubDiscovery{Repo: "a/b", Filter: `^v`, Prefix: "v"}},
 		{GitLab: &GitLabDiscovery{Repo: "a/b/c", Filter: `^v`, Prefix: "v"}},
 		{Git: &GitDiscovery{URL: "https://e.com/a/b.git", Filter: `^v`}},
+		{HTTP: &HTTPDiscovery{URL: "https://e.com/dl/", Filter: `x-(\d+\.\d+)\.tar\.gz`}},
 		{OCI: "ghcr.io/x/y"},
 	}
 	for _, d := range sources {

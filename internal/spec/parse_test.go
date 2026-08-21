@@ -145,6 +145,32 @@ versionDiscovery:
 	}
 }
 
+func TestParseHTTPDiscovery(t *testing.T) {
+	y := `
+schema: 2
+name: gpgme
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+versionDiscovery:
+  http:
+    url: https://gnupg.org/ftp/gcrypt/gpgme/
+    filter: 'gpgme-(\d+\.\d+\.\d+)\.tar\.bz2'
+`
+	p, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	h := p.VersionDiscovery.HTTP
+	if h == nil || h.URL != "https://gnupg.org/ftp/gcrypt/gpgme/" ||
+		h.Filter != `gpgme-(\d+\.\d+\.\d+)\.tar\.bz2` {
+		t.Fatalf("http discovery: %+v", h)
+	}
+}
+
 func TestParseRejectsScalarSha256(t *testing.T) {
 	y := `
 schema: 2

@@ -24,6 +24,8 @@ func List(ctx context.Context, pkg *spec.Package) ([]string, error) {
 		return gitlabVersions(ctx, http.DefaultClient, d.GitLab)
 	case d.Git != nil:
 		return gitVersions(ctx, http.DefaultClient, d.Git.URL, d.Git.Filter, d.Git.Prefix, d.Git.Suffix)
+	case d.HTTP != nil:
+		return httpVersions(ctx, http.DefaultClient, d.HTTP)
 	case d.OCI != "":
 		return ociTags(ctx, d.OCI)
 	}
