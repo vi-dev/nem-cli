@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vi-dev/nem-cli/internal/project"
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 func TestStatusListsToolsAndEnv(t *testing.T) {
@@ -108,6 +111,45 @@ func TestStatusInstalledColumn(t *testing.T) {
 	fields := strings.Fields(toolLine)
 	if got := fields[len(fields)-1]; got != "yes" {
 		t.Fatalf("tool row INSTALLED cell = %q, want yes: %q", got, toolLine)
+	}
+}
+
+func TestStatusSummarizesUninstalledPackagesPerScope(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	platforms := []string{spec.Current().String()}
+	writeFile(t, filepath.Join(projDir, "nem.toml"), "[tools]\n\"test:ghost\" = \"v1.0.0\"\n")
+	lf := &project.Lockfile{Path: filepath.Join(projDir, "nem.lock"), Packages: []project.LockEntry{
+		{Name: "ghost", Version: "v1.0.0", Catalog: "test", Direct: true, OnPath: true, Platforms: platforms},
+	}}
+	if err := project.WriteLock(lf); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	globalLock := &project.Lockfile{Path: testNemHome(nemHomeDir).GlobalLock(), Packages: []project.LockEntry{
+		{Name: "gtool", Version: "v2.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+		{Name: "htool", Version: "v3.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+	}}
+	if err := project.WriteLock(globalLock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	_, errb, err := runNem(t, nemHomeDir, "status")
+	if err != nil {
+		t.Fatalf("status: %v\nstderr: %s", err, errb)
+	}
+	if !strings.HasPrefix(errb, "\n") || strings.HasPrefix(errb, "\n\n") {
+		t.Errorf("want exactly one blank line separating the table from the summary, stderr: %q", errb)
+	}
+	if !strings.Contains(errb, "1 project package not installed — run `nem sync`") {
+		t.Errorf("stderr missing project-scope summary: %q", errb)
+	}
+	if !strings.Contains(errb, "2 global packages not installed — run `nem sync -g`") {
+		t.Errorf("stderr missing global-scope summary: %q", errb)
+	}
+	if strings.Contains(errb, "no install metadata") {
+		t.Errorf("uninstalled packages must be summarized, not warned per package: %q", errb)
 	}
 }
 

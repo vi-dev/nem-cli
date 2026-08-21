@@ -228,7 +228,7 @@ func TestExecChildEnvHasNoSavedBookkeeping(t *testing.T) {
 	}
 }
 
-func TestExecComposeWarningsGoToStderr(t *testing.T) {
+func TestExecDoesNotWarnAboutUninstalledPackages(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	projDir := t.TempDir()
 	chdir(t, projDir)
@@ -245,8 +245,8 @@ func TestExecComposeWarningsGoToStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("exec: %v\n%s", err, errb)
 	}
-	if !strings.Contains(errb, "no install metadata for ghost@v1.0.0") {
-		t.Fatalf("stderr missing compose warning: %q", errb)
+	if errb != "" {
+		t.Fatalf("expected silent stderr for uninstalled packages, got: %q", errb)
 	}
 }
 

@@ -174,14 +174,20 @@ func containsString(list []string, s string) bool {
 }
 
 // resolveEntries looks up each entry's install metadata and install dir,
-// warning and skipping an entry that fails either.
+// skipping an entry that fails either. An entry that is simply not
+// installed is skipped silently — composition runs on every directory
+// change, so `nem sync`/`nem status` own that warning. An entry whose
+// install dir exists but whose metadata is unreadable warns, since sync
+// skips existing installs and cannot repair it.
 func resolveEntries(entries []project.LockEntry, metaLookup func(name, version string) (*install.Meta, bool), h home.Home) ([]resolvedEntry, []string) {
 	var out []resolvedEntry
 	var warnings []string
 	for _, e := range entries {
 		meta, ok := metaLookup(e.Name, e.Version)
 		if !ok {
-			warnings = append(warnings, fmt.Sprintf("no install metadata for %s@%s", e.Name, e.Version))
+			if install.IsInstalled(h, e.Name, e.Version) {
+				warnings = append(warnings, fmt.Sprintf("no install metadata for %s@%s", e.Name, e.Version))
+			}
 			continue
 		}
 		installDir, err := h.PackageDir(e.Name, e.Version)

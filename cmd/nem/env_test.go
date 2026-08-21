@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/vi-dev/nem-cli/internal/project"
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 func TestEnvEmitsProjectVarOnStdoutOnly(t *testing.T) {
@@ -42,6 +45,40 @@ func TestEnvWithNoProjectManifestStillEmitsGlobalLayer(t *testing.T) {
 	}
 	if !strings.Contains(out, "export BAR='baz'\n") {
 		t.Fatalf("stdout missing global BAR export:\n%s", out)
+	}
+}
+
+func TestEnvDoesNotWarnAboutUninstalledPackages(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	writeFile(t, filepath.Join(projDir, "nem.toml"), "")
+	platforms := []string{spec.Current().String()}
+	projLock := &project.Lockfile{Path: filepath.Join(projDir, "nem.lock"), Packages: []project.LockEntry{
+		{Name: "ghost", Version: "v1.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+	}}
+	if err := project.WriteLock(projLock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	globalLock := &project.Lockfile{Path: testNemHome(nemHomeDir).GlobalLock(), Packages: []project.LockEntry{
+		{Name: "gtool", Version: "v2.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+		{Name: "htool", Version: "v3.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+	}}
+	if err := project.WriteLock(globalLock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	// The activation hook re-evaluates `nem env` on every directory change
+	// (and after `nem <anything> --help` via the sync-family wrapper), so
+	// uninstalled packages must not produce any narration here — `nem sync`
+	// and `nem status` own that warning.
+	_, errb, err := runNem(t, nemHomeDir, "env", "--shell", "bash")
+	if err != nil {
+		t.Fatalf("env: %v\n%s", err, errb)
+	}
+	if errb != "" {
+		t.Fatalf("expected silent stderr for uninstalled packages, got: %q", errb)
 	}
 }
 

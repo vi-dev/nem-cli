@@ -2,12 +2,14 @@ package main
 
 import (
 	"os"
+	"slices"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/envx"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
+	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 func newStatusCmd() *cobra.Command {
@@ -84,6 +86,12 @@ func runStatus(global bool) error {
 			return err
 		}
 	}
+	projLock, globalLock := lock, otherLock
+	if global {
+		projLock, globalLock = otherLock, lock
+	}
+	warnMissingInstalls(projLock, globalLock)
+
 	result := envx.ComposeScope(m, other, lock, otherLock, nemHome, installMetaLookup, os.LookupEnv)
 	for _, w := range result.Warnings {
 		console.Warn("%s", w)
@@ -97,4 +105,42 @@ func runStatus(global bool) error {
 		console.Table([]string{"variable", "value", "source"}, envRows)
 	}
 	return nil
+}
+
+// warnMissingInstalls reports locked-but-not-installed packages as one
+// actionable line per scope. Only status calls this: every other command
+// either runs from the activation hook on directory changes (`nem env`)
+// or narrates its own work, so status alone owns this warning.
+func warnMissingInstalls(projLock, globalLock *project.Lockfile) {
+	nProj, nGlobal := countMissing(projLock), countMissing(globalLock)
+	if nProj == 0 && nGlobal == 0 {
+		return
+	}
+	console.Info("") // blank line separating the table from the warnings
+	if nProj > 0 {
+		console.Warn("%d project %s not installed — run `nem sync`", nProj, packagesWord(nProj))
+	}
+	if nGlobal > 0 {
+		console.Warn("%d global %s not installed — run `nem sync -g`", nGlobal, packagesWord(nGlobal))
+	}
+}
+
+// countMissing counts lock entries valid on the current platform with no
+// install on this machine — exactly the entries sync would install.
+func countMissing(lock *project.Lockfile) int {
+	current := spec.Current().String()
+	n := 0
+	for _, e := range lock.Packages {
+		if slices.Contains(e.Platforms, current) && !install.IsInstalled(nemHome, e.Name, e.Version) {
+			n++
+		}
+	}
+	return n
+}
+
+func packagesWord(n int) string {
+	if n == 1 {
+		return "package"
+	}
+	return "packages"
 }

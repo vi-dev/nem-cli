@@ -374,3 +374,28 @@ func TestSyncDigestMismatchErrors(t *testing.T) {
 		t.Fatalf("stderr should carry the digest-mismatch hint: %q", errb)
 	}
 }
+
+func TestSyncDoesNotWarnAboutMissingInstalls(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+	writeFile(t, filepath.Join(projDir, "nem.toml"), "")
+
+	platforms := []string{spec.Current().String()}
+	globalLock := &project.Lockfile{Path: testNemHome(nemHomeDir).GlobalLock(), Packages: []project.LockEntry{
+		{Name: "gtool", Version: "v2.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+		{Name: "htool", Version: "v3.0.0", Catalog: "test", Direct: true, Platforms: platforms},
+	}}
+	if err := project.WriteLock(globalLock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+
+	// `nem status` alone owns the not-installed summary.
+	_, errb, err := runNem(t, nemHomeDir, "sync")
+	if err != nil {
+		t.Fatalf("sync: %v\n%s", err, errb)
+	}
+	if errb != "" {
+		t.Fatalf("expected silent stderr, got: %q", errb)
+	}
+}

@@ -1,6 +1,7 @@
 package envx
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -560,5 +561,69 @@ func TestComposeScopeResolvesOtherScopeManagedReferences(t *testing.T) {
 	}
 	if got["BAR"] != "/original/bin" {
 		t.Errorf("BAR = %q, want /original/bin (reference to other-scope-managed FOO must use the saved original)", got["BAR"])
+	}
+}
+
+func TestComposeNotInstalledEntriesSilentlySkipped(t *testing.T) {
+	h := testHome()
+
+	projectLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgp", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+	globalLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgg", Version: "2.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+
+	result := Compose(&project.Manifest{}, &project.Manifest{}, projectLock, globalLock, h,
+		mapMetaLookup(nil), mapGetenv(nil))
+
+	if len(result.Warnings) != 0 {
+		t.Errorf("Warnings = %v, want empty (composition runs on every directory change; `nem sync`/`nem status` own the not-installed warning)", result.Warnings)
+	}
+	if len(result.Path) != 0 {
+		t.Errorf("Path = %v, want empty (nothing installed)", result.Path)
+	}
+}
+
+func TestComposeInstalledEntryWithUnreadableMetaStillWarns(t *testing.T) {
+	dir := t.TempDir()
+	h := home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return dir
+		}
+		return ""
+	})
+	installDir, err := h.PackageDir("pkgc", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(installDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	projectLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgc", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+
+	result := Compose(&project.Manifest{}, &project.Manifest{}, projectLock, &project.Lockfile{}, h,
+		mapMetaLookup(nil), mapGetenv(nil))
+
+	if !anyContains(result.Warnings, "no install metadata for pkgc@1.0.0") {
+		t.Errorf("expected a metadata warning for the broken install, got %v", result.Warnings)
+	}
+}
+
+func TestComposeScopeNotInstalledEntriesNotWarned(t *testing.T) {
+	h := testHome()
+
+	scopeLock := &project.Lockfile{Packages: []project.LockEntry{
+		{Name: "pkgs", Version: "1.0.0", Direct: true, OnPath: true, Platforms: []string{currentPlatform()}},
+	}}
+
+	result := ComposeScope(&project.Manifest{}, &project.Manifest{}, scopeLock, &project.Lockfile{}, h,
+		mapMetaLookup(nil), mapGetenv(nil))
+
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %v, want empty (status shows install state in its own table)", result.Warnings)
 	}
 }
