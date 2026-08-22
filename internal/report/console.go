@@ -106,10 +106,17 @@ func (c *Console) Debug(format string, a ...any) {
 }
 
 func (c *Console) Success(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	c.narrate(func() { c.successLocked(msg) })
+}
+
+// successLocked renders the success line without live-block
+// coordination: only for callers already inside a narrate or
+// completeTask callback, which hold liveMu.
+func (c *Console) successLocked(msg string) {
 	if c.opts.Quiet {
 		return
 	}
-	msg := fmt.Sprintf(format, a...)
 	if c.colored {
 		fmt.Fprintf(c.err, "%s✓%s %s\n", ansiGreen, ansiReset, msg)
 	} else {
@@ -139,11 +146,7 @@ func (c *Console) Error(err error, hint string) {
 			fmt.Fprintf(c.err, "ERROR %s\n", msg)
 		}
 		if hint != "" {
-			if c.colored {
-				fmt.Fprintf(c.err, "  %s→ %s%s\n", ansiDim, hint, ansiReset)
-			} else {
-				fmt.Fprintf(c.err, "  hint: %s\n", hint)
-			}
+			c.hintLocked(hint)
 		}
 	})
 }
@@ -154,6 +157,12 @@ func (c *Console) Hint(msg string) {
 	if c.opts.Quiet {
 		return
 	}
+	c.narrate(func() { c.hintLocked(msg) })
+}
+
+// hintLocked renders the hint line without live-block coordination: only
+// for callers already inside a narrate callback, which holds liveMu.
+func (c *Console) hintLocked(msg string) {
 	if c.colored {
 		fmt.Fprintf(c.err, "  %s→ %s%s\n", ansiDim, msg, ansiReset)
 	} else {
@@ -190,7 +199,6 @@ func (c *Console) Blank() {
 }
 
 func (c *Console) Table(headers []string, rows [][]string) {
-	// Find max column count across headers and all rows
 	maxCols := len(headers)
 	for _, r := range rows {
 		if len(r) > maxCols {
@@ -198,7 +206,6 @@ func (c *Console) Table(headers []string, rows [][]string) {
 		}
 	}
 
-	// Calculate column widths
 	widths := make([]int, maxCols)
 	for i, h := range headers {
 		if i < maxCols {
@@ -213,7 +220,8 @@ func (c *Console) Table(headers []string, rows [][]string) {
 		}
 	}
 
-	// Render table with ragged row handling
+	// Rows may be ragged: short rows pad with empty cells, extra cells
+	// still render.
 	line := func(cells []string, upper bool) {
 		var b strings.Builder
 		for i := 0; i < maxCols; i++ {
@@ -238,11 +246,13 @@ func (c *Console) Table(headers []string, rows [][]string) {
 }
 
 func (c *Console) dim(msg string) {
-	if c.colored {
-		fmt.Fprintf(c.err, "%s%s%s\n", ansiDim, msg, ansiReset)
-	} else {
-		fmt.Fprintln(c.err, msg)
-	}
+	c.narrate(func() {
+		if c.colored {
+			fmt.Fprintf(c.err, "%s%s%s\n", ansiDim, msg, ansiReset)
+		} else {
+			fmt.Fprintln(c.err, msg)
+		}
+	})
 }
 
 func capitalizeLead(s string) string {

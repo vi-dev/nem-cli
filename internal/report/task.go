@@ -85,7 +85,7 @@ func (t *task) Done(outcome string) {
 	}
 	elapsed := t.console.now().Sub(t.start)
 	t.console.completeTask(t, func() {
-		t.console.Success("%s%s", outcome, DurSuffix(elapsed))
+		t.console.successLocked(outcome + DurSuffix(elapsed))
 	})
 }
 

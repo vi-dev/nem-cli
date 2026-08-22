@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -184,4 +185,20 @@ func TestColorAutoFollowsTTY(t *testing.T) {
 	if !strings.Contains(errb2.String(), "OK Off") {
 		t.Errorf("ColorAuto without TTY should be plain: %q", errb2.String())
 	}
+}
+
+func TestNarrationIsGoroutineSafe(t *testing.T) {
+	c, _, _ := newTest(Options{Color: ColorNever, Verbose: true})
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c.Success("s")
+			c.Warn("w")
+			c.Debug("d")
+			c.Hint("h")
+		}()
+	}
+	wg.Wait()
 }
