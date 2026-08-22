@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,7 +167,10 @@ versions:
 	}
 }
 
-func TestResolveVersionConflictHighestWins(t *testing.T) {
+// TestResolveExactDepsDivergeConflict proves two dep edges demanding
+// different exact versions of one package conflict — in any tools order,
+// with canonical error fields naming both demands.
+func TestResolveExactDepsDivergeConflict(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
 schema: 2
@@ -205,14 +209,78 @@ install:
 versions:
   - v1.0.0
 `)
-	tools := []resolve.Tool{{Key: project.ToolKey{Name: "p1"}}, {Key: project.ToolKey{Name: "p2"}}}
-	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
+	orders := map[string][]string{
+		"p1 first": {"p1", "p2"},
+		"p2 first": {"p2", "p1"},
 	}
-	d := entry(t, res, "d")
-	if d.Version != "v2.0.0" {
-		t.Fatalf("want highest version v2.0.0, got %s", d.Version)
+	for name, order := range orders {
+		t.Run(name, func(t *testing.T) {
+			tools := make([]resolve.Tool, len(order))
+			for i, n := range order {
+				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
+			}
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "d" || sce.A != "v1.0.0" || sce.ASource != "p1" || sce.B != "v2.0.0" || sce.BSource != "p2" {
+				t.Fatalf("conflict fields should be canonical in any order: %+v", sce)
+			}
+		})
+	}
+}
+
+// TestResolveUnpinnedRootVsExactDepConflicts proves a version-less direct
+// tool demands its resolved latest: a dep edge naming a different exact
+// version conflicts instead of being silently outvoted.
+func TestResolveUnpinnedRootVsExactDepConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.0.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: b
+deps:
+  - name: a
+    version: v1.0.0
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	orders := map[string][]resolve.Tool{
+		"root first": {
+			{Key: project.ToolKey{Name: "a"}},
+			{Key: project.ToolKey{Name: "b"}},
+		},
+		"dep first": {
+			{Key: project.ToolKey{Name: "b"}},
+			{Key: project.ToolKey{Name: "a"}},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "a" {
+				t.Fatalf("conflict should name a: %+v", sce)
+			}
+		})
 	}
 }
 
@@ -332,14 +400,11 @@ versions:
 	}
 }
 
-// TestResolveEqualVersionTieBreakFirstProcessedWins proves the deterministic
-// tie-break documented on reconcile: when a catalog-pinned direct tool and
-// an unprefixed dep both resolve "shared" to the same version, the direct
-// tool's attribution wins because roots are reconciled before their own
-// dependency subtree is walked. Swapping which tool is listed first flips
-// the winner, showing the rule tracks processing order rather than
-// favoring "direct" or a particular catalog.
-func TestResolveEqualVersionTieBreakFirstProcessedWins(t *testing.T) {
+// TestResolveEqualVersionPinKeepsAttribution proves attribution follows
+// the demand that determined the version: a catalog-pinned direct tool
+// keeps its catalog in the lock even when a bare dep edge resolves the
+// same version through another catalog first — in either tools order.
+func TestResolveEqualVersionPinKeepsAttribution(t *testing.T) {
 	rootA := t.TempDir()
 	writePkg(t, rootA, `
 schema: 2
@@ -401,8 +466,113 @@ versions:
 		t.Fatalf("Resolve (swapped): %v", err)
 	}
 	sharedSwapped := entry(t, resSwapped, "shared")
-	if sharedSwapped.Catalog != "a" {
-		t.Fatalf("swapping tool order should flip the tie's winner to catalog a, got %+v", sharedSwapped)
+	if sharedSwapped.Catalog != "b" {
+		t.Fatalf("the pin's catalog must win the tie in either order, got %+v", sharedSwapped)
+	}
+}
+
+// TestResolveCatalogQualifiedRootKeepsAttribution proves a
+// catalog-qualified, version-less direct tool keeps its catalog in the
+// lock over an equal-version exact dep edge resolved through another
+// catalog — in either tools order.
+func TestResolveCatalogQualifiedRootKeepsAttribution(t *testing.T) {
+	rootA := t.TempDir()
+	writePkg(t, rootA, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, rootA, `
+schema: 2
+name: app
+deps: [{name: shared, version: v1.0.0}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	rootB := t.TempDir()
+	writePkg(t, rootB, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	sources := []catalog.Named{
+		{Name: "a", Source: catalog.NewDir(rootA)},
+		{Name: "b", Source: catalog.NewDir(rootB)},
+	}
+	orders := map[string][]resolve.Tool{
+		"tool first": {
+			{Key: project.ToolKey{Catalog: "b", Name: "shared"}},
+			{Key: project.ToolKey{Name: "app"}},
+		},
+		"dep first": {
+			{Key: project.ToolKey{Name: "app"}},
+			{Key: project.ToolKey{Catalog: "b", Name: "shared"}},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			res, err := resolve.Resolve(context.Background(), tools, sources)
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
+			}
+			if shared := entry(t, res, "shared"); shared.Catalog != "b" {
+				t.Fatalf("the qualified tool's catalog must win in either order, got %+v", shared)
+			}
+		})
+	}
+}
+
+// TestResolveDisjointRangesCanonicalConflict proves the reported pair of
+// a multi-range conflict is canonical: with three pairwise-disjoint
+// ranges, every tools permutation reports the same two.
+func TestResolveDisjointRangesCanonicalConflict(t *testing.T) {
+	root := t.TempDir()
+	for _, p := range []struct{ name, compat string }{
+		{"r1", "1"}, {"r2", "2"}, {"r3", "3"},
+	} {
+		writePkg(t, root, `
+schema: 2
+name: `+p.name+`
+platforms: [darwin/arm64]
+deps: [{name: openssl, kind: link, compat: "`+p.compat+`"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	}
+	writePkg(t, root, `
+schema: 2
+name: openssl
+platforms: [darwin/arm64]
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.0.0, v2.0.0, v1.0.0]
+`)
+	perms := [][]string{
+		{"r1", "r2", "r3"}, {"r1", "r3", "r2"}, {"r2", "r1", "r3"},
+		{"r2", "r3", "r1"}, {"r3", "r1", "r2"}, {"r3", "r2", "r1"},
+	}
+	for _, order := range perms {
+		t.Run(strings.Join(order, ","), func(t *testing.T) {
+			tools := make([]resolve.Tool, len(order))
+			for i, n := range order {
+				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
+			}
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "openssl" || sce.A != "1" || sce.ASource != "r1" || sce.B != "2" || sce.BSource != "r2" {
+				t.Fatalf("conflict pair should be canonical in any order: %+v", sce)
+			}
+		})
 	}
 }
 
@@ -855,6 +1025,254 @@ versions: [v1.0.0]
 	}
 	if a := entry(t, res, "a"); a.Version != "v1.0.0" {
 		t.Fatalf("bare build dep floated a to %s over b's exact v1.0.0", a.Version)
+	}
+}
+
+// TestResolvePinnedRootWithinCompatRangeKeepsPin proves a compat-ranged
+// link dep is satisfied by a direct pin inside its range: the pin must win
+// over the range's default highest match, regardless of which side
+// reconciles first.
+func TestResolvePinnedRootWithinCompatRangeKeepsPin(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: app
+deps: [{name: gpgme, kind: link, compat: "1"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: gpgme
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [2.0.0, 1.24.3, 1.24.2]
+`)
+	orders := map[string][]resolve.Tool{
+		"pin first": {
+			{Key: project.ToolKey{Name: "gpgme"}, Version: "1.24.2"},
+			{Key: project.ToolKey{Name: "app"}},
+		},
+		"dep first": {
+			{Key: project.ToolKey{Name: "app"}},
+			{Key: project.ToolKey{Name: "gpgme"}, Version: "1.24.2"},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			if err != nil {
+				t.Fatalf("in-range pin must satisfy the compat edge, got error: %v", err)
+			}
+			if g := entry(t, res, "gpgme"); g.Version != "1.24.2" || !g.Direct {
+				t.Fatalf("entry gpgme: %+v, want pinned 1.24.2", g)
+			}
+		})
+	}
+}
+
+// TestResolveExactDepOutsideCompatRangeConflicts proves an exact dep edge
+// the merged range excludes conflicts in either reconcile order. The
+// packages support a single platform so nothing is re-reconciled by a
+// second platform walk.
+func TestResolveExactDepOutsideCompatRangeConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: p1
+platforms: [darwin/arm64]
+deps: [{name: openssl, version: v1.1.1}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p2
+platforms: [darwin/arm64]
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+platforms: [darwin/arm64]
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.5.1, v1.1.1]
+`)
+	orders := map[string][]resolve.Tool{
+		"exact first": {
+			{Key: project.ToolKey{Name: "p1"}},
+			{Key: project.ToolKey{Name: "p2"}},
+		},
+		"compat first": {
+			{Key: project.ToolKey{Name: "p2"}},
+			{Key: project.ToolKey{Name: "p1"}},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "openssl" {
+				t.Fatalf("conflict should name openssl: %+v", sce)
+			}
+		})
+	}
+}
+
+// TestResolveUnpinnedRootOutsideCompatRangeConflicts proves a version-less
+// direct tool demands its resolved latest: a dep's compat range that
+// excludes latest conflicts in either reconcile order instead of silently
+// floating the tool down into the range. Single-platform packages so no
+// second platform walk re-reconciles the root.
+func TestResolveUnpinnedRootOutsideCompatRangeConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: app
+platforms: [darwin/arm64]
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+platforms: [darwin/arm64]
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v4.0.0, v3.5.1]
+`)
+	orders := map[string][]resolve.Tool{
+		"root first": {
+			{Key: project.ToolKey{Name: "openssl"}},
+			{Key: project.ToolKey{Name: "app"}},
+		},
+		"dep first": {
+			{Key: project.ToolKey{Name: "app"}},
+			{Key: project.ToolKey{Name: "openssl"}},
+		},
+	}
+	for name, tools := range orders {
+		t.Run(name, func(t *testing.T) {
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "openssl" {
+				t.Fatalf("conflict should name openssl: %+v", sce)
+			}
+		})
+	}
+}
+
+// TestResolveOrderIndependentConflict proves resolution's outcome is the
+// same for every tools permutation when two exact dep versions and a
+// compat range meet: the exact divergence conflicts first, canonically.
+func TestResolveOrderIndependentConflict(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: p1
+platforms: [darwin/arm64]
+deps: [{name: openssl, version: v1.8.0}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p2
+platforms: [darwin/arm64]
+deps: [{name: openssl, version: v1.9.0}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: p3
+platforms: [darwin/arm64]
+deps: [{name: openssl, kind: link, compat: "1.9"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+platforms: [darwin/arm64]
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.9.0, v1.8.0]
+`)
+	perms := [][]string{
+		{"p1", "p2", "p3"}, {"p1", "p3", "p2"}, {"p2", "p1", "p3"},
+		{"p2", "p3", "p1"}, {"p3", "p1", "p2"}, {"p3", "p2", "p1"},
+	}
+	for _, order := range perms {
+		t.Run(strings.Join(order, ","), func(t *testing.T) {
+			tools := make([]resolve.Tool, len(order))
+			for i, n := range order {
+				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
+			}
+			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			var sce *resolve.SonameConflictError
+			if !errors.As(err, &sce) {
+				t.Fatalf("want SonameConflictError, got %v", err)
+			}
+			if sce.Name != "openssl" || sce.A != "v1.8.0" || sce.ASource != "p1" || sce.B != "v1.9.0" || sce.BSource != "p2" {
+				t.Fatalf("conflict fields should be canonical in any order: %+v", sce)
+			}
+		})
+	}
+}
+
+// TestResolvePinnedRootOutsideCompatRangeConflicts guards the counterpart:
+// a pin the range excludes still fails resolution.
+func TestResolvePinnedRootOutsideCompatRangeConflicts(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: app
+deps: [{name: openssl, kind: link, compat: "3"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: openssl
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.5.1, v1.1.1]
+`)
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Name: "openssl"}, Version: "v1.1.1"},
+		{Key: project.ToolKey{Name: "app"}},
+	}
+	_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	var pce *resolve.PinConflictError
+	if !errors.As(err, &pce) {
+		t.Fatalf("want PinConflictError, got %v", err)
+	}
+	if pce.Name != "openssl" || pce.Pinned != "v1.1.1" || pce.Required != "v3.5.1" {
+		t.Fatalf("PinConflictError: %+v", pce)
 	}
 }
 

@@ -39,5 +39,9 @@ func hintFor(err error) string {
 	if errors.As(err, &pce) {
 		return fmt.Sprintf("Re-pin with `nem use %s@%s` or unuse the tool requiring it", pce.Name, pce.Required)
 	}
+	var sce *resolve.SonameConflictError
+	if errors.As(err, &sce) {
+		return fmt.Sprintf("Unuse one of the conflicting tools, or re-pin %s to a version they all accept", sce.Name)
+	}
 	return ""
 }
