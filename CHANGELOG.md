@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.3.0](https://github.com/vi-dev/nem-cli/compare/v0.2.0...v0.3.0) (2026-08-22)
+
+
+### Features
+
+* Add autotools and generator tools to the build image ([5d738a4](https://github.com/vi-dev/nem-cli/commit/5d738a413a984ac882ce890e5cfceaf55e26453a))
+* Add rootless runtime image variant ([5f6f88d](https://github.com/vi-dev/nem-cli/commit/5f6f88d735a7217a8173b0600782739138d47ac6))
+* Make resolution order-independent via two-phase selection ([03e6950](https://github.com/vi-dev/nem-cli/commit/03e69501ff970d2c84fd1f8e9273908c3294b748))
+* Support directory targets in nem catalog bump ([b46b70b](https://github.com/vi-dev/nem-cli/commit/b46b70bcac4fe78d800a8e69658f7dde02cc7de8))
+
+
+### Bug Fixes
+
+* Serialize console narration for concurrent writers ([ae07f17](https://github.com/vi-dev/nem-cli/commit/ae07f177e21cca9160eed92f3c2ec20f72146056))
+
+
+### Performance
+
+* Open the catalog mirror once per command ([de1cd07](https://github.com/vi-dev/nem-cli/commit/de1cd07d36ba5c96633eddf44b85c0efafdf269d))
+
 ## [0.2.0](https://github.com/vi-dev/nem-cli/compare/v0.1.1...v0.2.0) (2026-08-21)
 
 
