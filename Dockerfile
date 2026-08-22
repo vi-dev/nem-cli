@@ -13,6 +13,16 @@ RUN apt-get update \
         curl \
         bzip2 \
         xz-utils \
+        autoconf \
+        automake \
+        libtool \
+        m4 \
+        gperf \
+        gettext \
+        bison \
+        flex \
+        texinfo \
+        patch \
     && rm -rf /var/lib/apt/lists/*
 
 # goreleaser dockers_v2 places pre-built binaries in <TARGETPLATFORM>/nem
