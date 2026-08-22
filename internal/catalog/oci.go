@@ -15,23 +15,55 @@ type OCI struct {
 	name      string
 	storePath string
 
-	mu   sync.Mutex
-	memo map[string]*spec.Package // by pkg manifest digest
+	mu    sync.Mutex
+	store *ocix.Store
+	memo  map[string]memoPkg // by package name
+}
+
+// memoPkg is a parsed, validated package and its manifest digest.
+type memoPkg struct {
+	pkg *spec.Package
+	dig string
 }
 
 var _ Source = (*OCI)(nil)
 
 func NewOCI(name, storePath string) *OCI {
-	return &OCI{name: name, storePath: storePath, memo: map[string]*spec.Package{}}
+	return &OCI{name: name, storePath: storePath, memo: map[string]memoPkg{}}
+}
+
+// Open opens the catalog's local mirror, sharing the open with every
+// later load. ErrNotSynced reports a mirror that was never synced.
+func (o *OCI) Open(ctx context.Context) error {
+	_, err := o.open(ctx)
+	return err
+}
+
+// open opens the mirror once and reuses it: the layout scan dominates a
+// load's cost, so it must not repeat per package. A failed open is not
+// kept — a mirror synced later in the process still opens. The open
+// store and memo are point-in-time: a mirror resynced mid-process is
+// not observed by this source.
+func (o *OCI) open(ctx context.Context) (*ocix.Store, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.store == nil {
+		s, err := ocix.OpenStore(ctx, o.storePath)
+		if err != nil {
+			return nil, err
+		}
+		o.store = s
+	}
+	return o.store, nil
 }
 
 func (o *OCI) Summaries(ctx context.Context) ([]Summary, error) {
-	idx, err := ocix.LoadIndex(ctx, o.storePath)
+	s, err := o.open(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var out []Summary
-	for _, m := range idx.Manifests {
+	for _, m := range s.Index().Manifests {
 		name := m.Annotations[ocix.AnnotationTitle]
 		if name == "" {
 			continue
@@ -46,7 +78,17 @@ func (o *OCI) Summaries(ctx context.Context) ([]Summary, error) {
 }
 
 func (o *OCI) Load(ctx context.Context, name string) (*spec.Package, string, error) {
-	data, dig, err := ocix.LoadPkgBytes(ctx, o.storePath, name)
+	o.mu.Lock()
+	m, ok := o.memo[name]
+	o.mu.Unlock()
+	if ok {
+		return m.pkg, m.dig, nil
+	}
+	s, err := o.open(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	data, dig, err := s.PkgBytes(ctx, name)
 	var notIn *ocix.PkgNotInIndexError
 	if errors.As(err, &notIn) {
 		return nil, "", &PackageNotFoundError{Name: name}
@@ -54,13 +96,7 @@ func (o *OCI) Load(ctx context.Context, name string) (*spec.Package, string, err
 	if err != nil {
 		return nil, "", err
 	}
-	o.mu.Lock()
-	pkg, ok := o.memo[dig]
-	o.mu.Unlock()
-	if ok {
-		return pkg, dig, nil
-	}
-	pkg, err = spec.Parse(data)
+	pkg, err := spec.Parse(data)
 	if err != nil {
 		return nil, "", fmt.Errorf("catalog %s: %w", o.name, err)
 	}
@@ -71,7 +107,7 @@ func (o *OCI) Load(ctx context.Context, name string) (*spec.Package, string, err
 		return nil, "", fmt.Errorf("catalog %s: package %s: manifest declares name %q, want %q", o.name, name, pkg.Name, name)
 	}
 	o.mu.Lock()
-	o.memo[dig] = pkg
+	o.memo[name] = memoPkg{pkg: pkg, dig: dig}
 	o.mu.Unlock()
 	return pkg, dig, nil
 }

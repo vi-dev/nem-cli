@@ -37,18 +37,18 @@ func TestSyncAndLoad(t *testing.T) {
 		t.Fatalf("index digest: %q", dig)
 	}
 
-	idx, err := LoadIndex(ctx, storePath)
-	if err != nil || len(idx.Manifests) != 2 {
-		t.Fatalf("LoadIndex: %+v, %v", idx, err)
+	s, err := OpenStore(ctx, storePath)
+	if err != nil || len(s.Index().Manifests) != 2 {
+		t.Fatalf("OpenStore: %v", err)
 	}
 
-	data, mdig, err := LoadPkgBytes(ctx, storePath, "go")
+	data, mdig, err := s.PkgBytes(ctx, "go")
 	if err != nil || string(data) != string(goYAML) || !strings.HasPrefix(mdig, "sha256:") {
-		t.Fatalf("LoadPkgBytes: %q, %q, %v", data, mdig, err)
+		t.Fatalf("PkgBytes: %q, %q, %v", data, mdig, err)
 	}
 
 	var nf *PkgNotInIndexError
-	if _, _, err := LoadPkgBytes(ctx, storePath, "absent"); !errors.As(err, &nf) {
+	if _, _, err := s.PkgBytes(ctx, "absent"); !errors.As(err, &nf) {
 		t.Fatalf("want PkgNotInIndexError, got %v", err)
 	}
 }
@@ -70,14 +70,14 @@ func TestSyncRejectsWrongSchema(t *testing.T) {
 		t.Fatalf("want schema error, got %v", err)
 	}
 
-	idx, err := LoadIndex(ctx, storePath)
-	if err != nil || len(idx.Manifests) != 1 {
-		t.Fatalf("good mirror clobbered by bad-schema sync attempt: %+v, %v", idx, err)
+	s, err := OpenStore(ctx, storePath)
+	if err != nil || len(s.Index().Manifests) != 1 {
+		t.Fatalf("good mirror clobbered by bad-schema sync attempt: %v", err)
 	}
 }
 
-func TestLoadPkgBytesUnsynced(t *testing.T) {
-	_, _, err := LoadPkgBytes(context.Background(), filepath.Join(t.TempDir(), "nope"), "go")
+func TestOpenStoreUnsynced(t *testing.T) {
+	_, err := OpenStore(context.Background(), filepath.Join(t.TempDir(), "nope"))
 	if !errors.Is(err, ErrNotSynced) {
 		t.Fatalf("want ErrNotSynced, got %v", err)
 	}

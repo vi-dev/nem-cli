@@ -82,7 +82,7 @@ func runLock(cmd *cobra.Command, global bool) error {
 		return &UnpinnedToolsError{Path: path, Names: unpinned}
 	}
 
-	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg); err != nil {
+	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg, sources); err != nil {
 		release()
 		return err
 	}

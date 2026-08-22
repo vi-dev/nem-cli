@@ -183,7 +183,7 @@ func validateSrcSchema(ctx context.Context, src oras.ReadOnlyTarget, srcRef stri
 
 // validateSchema checks idx carries the catalog schema version this build
 // understands. Shared by SyncFrom (pre-copy, against the remote source)
-// and LoadIndex (post-sync, against the local mirror).
+// and OpenStore (post-sync, against the local mirror).
 func validateSchema(idx ocispec.Index) error {
 	if got := idx.Annotations[AnnotationSchemaVersion]; got != SchemaVersion {
 		return fmt.Errorf("unsupported catalog schema %q (want %s; a newer nem may be required)", got, SchemaVersion)
@@ -191,34 +191,71 @@ func validateSchema(idx ocispec.Index) error {
 	return nil
 }
 
-// LoadIndex reads and validates the locally synced catalog index.
-func LoadIndex(ctx context.Context, storePath string) (ocispec.Index, error) {
-	var idx ocispec.Index
+// Store is a locally synced catalog mirror opened for reading. Opening
+// scans the oras layout and parses the index once; every package load
+// shares that work instead of repeating it. A Store is a point-in-time
+// snapshot: a mirror resynced after opening is not observed.
+type Store struct {
+	store  *oci.Store
+	idx    ocispec.Index
+	byName map[string]ocispec.Descriptor
+}
+
+// OpenStore opens the synced mirror at storePath and loads its validated
+// index. ErrNotSynced reports a mirror that was never synced.
+func OpenStore(ctx context.Context, storePath string) (*Store, error) {
 	if _, err := os.Stat(storePath); os.IsNotExist(err) {
-		return idx, ErrNotSynced
+		return nil, ErrNotSynced
 	}
 	store, err := oci.New(storePath)
 	if err != nil {
-		return idx, fmt.Errorf("open catalog store %s: %w", storePath, err)
+		return nil, fmt.Errorf("open catalog store %s: %w", storePath, err)
 	}
 	desc, err := store.Resolve(ctx, LocalTag)
 	if err != nil {
 		if errors.Is(err, errdef.ErrNotFound) {
-			return idx, ErrNotSynced
+			return nil, ErrNotSynced
 		}
-		return idx, fmt.Errorf("resolve catalog index: %w", err)
+		return nil, fmt.Errorf("resolve catalog index: %w", err)
 	}
 	data, err := content.FetchAll(ctx, store, desc)
 	if err != nil {
-		return idx, fmt.Errorf("read catalog index: %w", err)
+		return nil, fmt.Errorf("read catalog index: %w", err)
 	}
+	var idx ocispec.Index
 	if err := json.Unmarshal(data, &idx); err != nil {
-		return idx, fmt.Errorf("parse catalog index: %w", err)
+		return nil, fmt.Errorf("parse catalog index: %w", err)
 	}
 	if err := validateSchema(idx); err != nil {
-		return idx, err
+		return nil, err
 	}
-	return idx, nil
+	byName := make(map[string]ocispec.Descriptor, len(idx.Manifests))
+	for _, m := range idx.Manifests {
+		name := m.Annotations[AnnotationTitle]
+		if name == "" {
+			continue
+		}
+		if _, ok := byName[name]; !ok {
+			byName[name] = m
+		}
+	}
+	return &Store{store: store, idx: idx, byName: byName}, nil
+}
+
+// Index returns the mirror's catalog index.
+func (s *Store) Index() ocispec.Index { return s.idx }
+
+// PkgBytes returns the raw pkg.yaml bytes and manifest digest for name.
+func (s *Store) PkgBytes(ctx context.Context, name string) ([]byte, string, error) {
+	m, ok := s.byName[name]
+	if !ok {
+		return nil, "", &PkgNotInIndexError{Name: name}
+	}
+	data, err := FetchPkgBytes(ctx, s.store, m)
+	if err != nil {
+		return nil, "", fmt.Errorf("load pkg.yaml for %s: %w", name, err)
+	}
+	return data, m.Digest.String(), nil
 }
 
 // FetchPkgBytes fetches the image manifest at man from src and returns
@@ -242,28 +279,4 @@ func FetchPkgBytes(ctx context.Context, src oras.ReadOnlyTarget, man ocispec.Des
 		}
 	}
 	return nil, errors.New("manifest has no pkg.yaml layer")
-}
-
-// LoadPkgBytes returns the raw pkg.yaml bytes and manifest digest for name
-// from the locally synced catalog.
-func LoadPkgBytes(ctx context.Context, storePath, name string) ([]byte, string, error) {
-	idx, err := LoadIndex(ctx, storePath)
-	if err != nil {
-		return nil, "", err
-	}
-	for _, m := range idx.Manifests {
-		if m.Annotations[AnnotationTitle] != name {
-			continue
-		}
-		store, err := oci.New(storePath)
-		if err != nil {
-			return nil, "", fmt.Errorf("open catalog store %s: %w", storePath, err)
-		}
-		data, err := FetchPkgBytes(ctx, store, m)
-		if err != nil {
-			return nil, "", fmt.Errorf("load pkg.yaml for %s: %w", name, err)
-		}
-		return data, m.Digest.String(), nil
-	}
-	return nil, "", &PkgNotInIndexError{Name: name}
 }

@@ -61,6 +61,12 @@ func newUnuseCmd() *cobra.Command {
 	return cmd
 }
 
+// mirrorOpener is the slice of catalog.Source autosync probes: opening
+// the local mirror reports ocix.ErrNotSynced when it was never synced.
+type mirrorOpener interface {
+	Open(ctx context.Context) error
+}
+
 type useArg struct {
 	Key     project.ToolKey
 	Version string
@@ -180,39 +186,43 @@ func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.
 // mirror has never been synced, so a first `use` right after `catalog add`
 // resolves without a separate `catalog update` step. A store that already
 // exists is left untouched even if stale — resyncing an existing mirror is
-// `catalog update`'s job, not use's.
+// `catalog update`'s job, not use's. Probing goes through each source so
+// an already-synced mirror's open is shared with resolution instead of
+// repeated.
 //
 // A sync failure is best-effort: it's warned about and use moves on to the
 // next catalog rather than aborting. If the failed catalog turns out to be
 // needed for resolution, catalog.Lookup surfaces ocix.ErrNotSynced for it
 // there, with the usual "nem catalog update" hint; if it wasn't needed, the
 // failure never mattered.
-func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config) error {
-	for _, e := range cfg.Catalogs {
-		if e.Disabled {
+func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config, sources []catalog.Named) error {
+	for _, n := range sources {
+		src, ok := n.Source.(mirrorOpener)
+		if !ok {
 			continue
 		}
-		if e.Type != "oci" {
-			continue
-		}
-		store, err := nemHome.CatalogStore(e.Name)
-		if err != nil {
-			return err
-		}
-		_, err = ocix.LoadIndex(ctx, store)
+		err := src.Open(ctx)
 		if err == nil {
 			continue
 		}
 		if !errors.Is(err, ocix.ErrNotSynced) {
 			return err
 		}
-		task := console.Task("Syncing catalog " + e.Name)
-		if err := syncCatalogStore(ctx, e.Ref, store); err != nil {
-			task.Fail(err.Error())
-			console.Warn("Could not sync catalog %s: %v", e.Name, err)
+		e := cfg.Find(n.Name)
+		if e == nil {
 			continue
 		}
-		task.Done("Synced catalog " + e.Name)
+		store, err := nemHome.CatalogStore(n.Name)
+		if err != nil {
+			return err
+		}
+		task := console.Task("Syncing catalog " + n.Name)
+		if err := syncCatalogStore(ctx, e.Ref, store); err != nil {
+			task.Fail(err.Error())
+			console.Warn("Could not sync catalog %s: %v", n.Name, err)
+			continue
+		}
+		task.Done("Synced catalog " + n.Name)
 	}
 	return nil
 }
@@ -243,7 +253,7 @@ func runUse(cmd *cobra.Command, args []string, global bool) error {
 		return err
 	}
 
-	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg); err != nil {
+	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg, sources); err != nil {
 		release()
 		return err
 	}

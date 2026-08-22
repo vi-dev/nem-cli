@@ -27,7 +27,7 @@ type FakeEntry struct {
 // tagging the resulting index "v2". It is the fake registry used by ocix
 // and catalog tests: an oci.New layout store stands in for the remote, and
 // SyncFrom copies layout-to-layout with no network involved.
-func PushFakeCatalogForTest(t *testing.T, store oras.Target, entries []FakeEntry, schemaVersion string) ocispec.Descriptor {
+func PushFakeCatalogForTest(t testing.TB, store oras.Target, entries []FakeEntry, schemaVersion string) ocispec.Descriptor {
 	t.Helper()
 	ctx := context.Background()
 
@@ -143,7 +143,7 @@ func PushFakeArchive(t *testing.T, store oras.Target, tag string, platforms map[
 	}
 }
 
-func pushFakeBlob(t *testing.T, ctx context.Context, store oras.Target, desc ocispec.Descriptor, data []byte) {
+func pushFakeBlob(t testing.TB, ctx context.Context, store oras.Target, desc ocispec.Descriptor, data []byte) {
 	t.Helper()
 	if err := store.Push(ctx, desc, bytes.NewReader(data)); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
 		t.Fatalf("push fake blob %s: %v", desc.Digest, err)

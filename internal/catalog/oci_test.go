@@ -3,6 +3,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -62,7 +63,7 @@ func TestOCISourceLoadAndVersions(t *testing.T) {
 	}
 	pkg2, _, _ := s.Load(ctx, "go")
 	if pkg2 != pkg {
-		t.Fatal("memoization by digest broken: distinct pointers")
+		t.Fatal("memoization broken: distinct pointers")
 	}
 	vs, err := s.Versions(ctx, "go")
 	if err != nil || len(vs) != 2 || vs[0] != "v1.26.5" {
@@ -101,6 +102,41 @@ func TestOCINameMismatchErrors(t *testing.T) {
 
 	if _, _, err := NewOCI("official", storePath).Load(ctx, "alias"); err == nil {
 		t.Fatal("manifest name mismatch must error")
+	}
+}
+
+// BenchmarkOCISourceResolvePattern models one command's resolution load:
+// a fresh source looking up 30 packages once per supported platform.
+func BenchmarkOCISourceResolvePattern(b *testing.B) {
+	src, err := oci.New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	const pkgs = 30
+	entries := make([]ocix.FakeEntry, pkgs)
+	for i := range entries {
+		name := fmt.Sprintf("pkg%d", i)
+		entries[i] = ocix.FakeEntry{
+			Name: name, Description: "bench", Latest: "v1.0.0",
+			YAML: []byte(fmt.Sprintf("schema: 2\nname: %s\nartifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\nversions: [v1.0.0]\n", name)),
+		}
+	}
+	ocix.PushFakeCatalogForTest(b, src, entries, "2")
+	storePath := filepath.Join(b.TempDir(), "store")
+	if _, err := ocix.SyncFrom(context.Background(), src, "v2", storePath); err != nil {
+		b.Fatal(err)
+	}
+	ctx := context.Background()
+	b.ResetTimer()
+	for b.Loop() {
+		s := NewOCI("official", storePath)
+		for range 4 {
+			for i := range pkgs {
+				if _, _, err := s.Load(ctx, fmt.Sprintf("pkg%d", i)); err != nil {
+					b.Fatal(err)
+				}
+			}
+		}
 	}
 }
 
