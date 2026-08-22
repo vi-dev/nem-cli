@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -27,7 +29,6 @@ func bumpArtifactServer(t *testing.T, version string) (*httptest.Server, map[str
 		sums[p.String()] = hex.EncodeToString(s[:])
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Path shape: /<version>/<os>-<arch>
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
 		if len(parts) != 2 || parts[0] != version {
 			http.NotFound(w, r)
@@ -115,12 +116,18 @@ func TestCatalogBumpUsesDiscoveryByDefault(t *testing.T) {
 	}
 }
 
+// stubBumpListFunc replaces discovery with fn for the test's duration.
+func stubBumpListFunc(t *testing.T, fn func(context.Context, *spec.Package) ([]string, error)) {
+	t.Helper()
+	restore := bumpList
+	bumpList = fn
+	t.Cleanup(func() { bumpList = restore })
+}
+
 // stubBumpList makes discovery return exactly versions, in that order.
 func stubBumpList(t *testing.T, versions ...string) {
 	t.Helper()
-	restore := bumpList
-	bumpList = func(_ context.Context, _ *spec.Package) ([]string, error) { return versions, nil }
-	t.Cleanup(func() { bumpList = restore })
+	stubBumpListFunc(t, func(context.Context, *spec.Package) ([]string, error) { return versions, nil })
 }
 
 // bumpMultiArtifactServer serves fake artifacts for every listed version
@@ -800,6 +807,266 @@ func TestCatalogBumpRejectsInvalidVersion(t *testing.T) {
 	}
 	if string(mustRead(t, path)) != string(before) {
 		t.Fatal("failed bump must not modify the manifest")
+	}
+}
+
+// sweepFixture is a manifest for multi-package sweep tests; discovery
+// toggles the versionDiscovery block.
+func sweepFixture(name, serverURL, current string, discovery bool) string {
+	disc := ""
+	if discovery {
+		disc = fmt.Sprintf("versionDiscovery:\n  github:\n    repo: example/%s\n", name)
+	}
+	return fmt.Sprintf(`schema: 2
+name: %s
+artifact:
+  url: "%s/{{.Version}}/{{.OS}}-{{.Arch}}"
+install:
+  - copy: {src: "{{.Artifact}}", dst: "bin/%s", mode: 0o755}
+%sversions:
+  - version: %s
+    sha256:
+      darwin/arm64: "aaa"
+      darwin/amd64: "bbb"
+      linux/arm64: "ccc"
+      linux/amd64: "ddd"
+`, name, serverURL, name, disc, current)
+}
+
+func namedBumpFixture(name, serverURL, current string) string {
+	return sweepFixture(name, serverURL, current, true)
+}
+
+// stubBumpListByName routes discovery per package name so a sweep can
+// return different versions for each package; a name missing from the
+// map fails discovery for that package.
+func stubBumpListByName(t *testing.T, byName map[string][]string) {
+	t.Helper()
+	stubBumpListFunc(t, func(_ context.Context, pkg *spec.Package) ([]string, error) {
+		vs, ok := byName[pkg.Name]
+		if !ok {
+			return nil, fmt.Errorf("discovery unavailable for %s", pkg.Name)
+		}
+		return vs, nil
+	})
+}
+
+func TestCatalogBumpDirMixedOutcomesExitsZero(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.1.0")
+	dir := writeLintFixture(t, map[string]string{
+		"aa": namedBumpFixture("aa", srv.URL, "1.0.0"),
+		"bb": namedBumpFixture("bb", srv.URL, "2.0.0"),
+		"cc": namedBumpFixture("cc", srv.URL, "3.0.0"),
+		"dd": sweepFixture("dd", srv.URL, "1.0.0", false),
+	})
+	stubBumpListByName(t, map[string][]string{
+		"aa": {"1.1.0", "1.0.0"},
+		"bb": {"2.0.0"},
+	}) // cc absent → its discovery fails
+	bbPath := filepath.Join(dir, "pkgs", "bb", "pkg.yaml")
+	bbBefore := mustRead(t, bbPath)
+
+	_, errOut, err := runNem(t, nemHome, "catalog", "bump", dir)
+	if err != nil {
+		t.Fatalf("sweep must exit zero on per-package failures: %v", err)
+	}
+	if !strings.Contains(errOut, "discovery unavailable for cc") {
+		t.Errorf("stderr = %q, want cc failure warning", errOut)
+	}
+	if !strings.Contains(errOut, "Checked 4 packages: 1 bumped, 1 up to date, 1 failed, 1 without discovery") {
+		t.Fatalf("stderr = %q, want mixed-outcome summary", errOut)
+	}
+	if string(mustRead(t, bbPath)) != string(bbBefore) {
+		t.Fatal("up-to-date package must not be rewritten")
+	}
+}
+
+func TestCatalogBumpDirSweepsAllPackages(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.1.0", "1.8.3")
+	dir := writeLintFixture(t, map[string]string{
+		"aa": namedBumpFixture("aa", srv.URL, "1.0.0"),
+		"jq": namedBumpFixture("jq", srv.URL, "1.8.2"),
+	})
+	stubBumpListByName(t, map[string][]string{
+		"aa": {"1.1.0", "1.0.0"},
+		"jq": {"1.8.3", "1.8.2"},
+	})
+
+	_, errOut, err := runNem(t, nemHome, "catalog", "bump", dir)
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	for name, want := range map[string]string{"aa": "1.1.0", "jq": "1.8.3"} {
+		pkg, err := spec.Parse(mustRead(t, filepath.Join(dir, "pkgs", name, "pkg.yaml")))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pkg.Versions[0].Version != want {
+			t.Fatalf("%s head = %q, want %q", name, pkg.Versions[0].Version, want)
+		}
+	}
+	for _, line := range []string{"Bumped aa 1.0.0 → 1.1.0", "Bumped jq 1.8.2 → 1.8.3"} {
+		if !strings.Contains(errOut, line) {
+			t.Errorf("stderr = %q, want %q", errOut, line)
+		}
+	}
+	if !strings.Contains(errOut, "Checked 2 packages: 2 bumped, 0 up to date, 0 failed, 0 without discovery") {
+		t.Fatalf("stderr = %q, want sweep summary", errOut)
+	}
+}
+
+func TestCatalogBumpVersionRejectsDirTarget(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.1.0")
+	dir := writeLintFixture(t, map[string]string{"aa": namedBumpFixture("aa", srv.URL, "1.0.0")})
+	stubBumpListByName(t, map[string][]string{"aa": {"1.1.0", "1.0.0"}})
+	path := filepath.Join(dir, "pkgs", "aa", "pkg.yaml")
+	before := mustRead(t, path)
+
+	_, _, err := runNem(t, nemHome, "catalog", "bump", "--version", "1.1.0", dir)
+	if err == nil || !strings.Contains(err.Error(), "single pkg.yaml") {
+		t.Fatalf("err = %v, want single-pkg.yaml rejection", err)
+	}
+	if string(mustRead(t, path)) != string(before) {
+		t.Fatal("rejected bump must not modify any manifest")
+	}
+}
+
+func TestCatalogBumpDefaultsToCurrentDir(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.1.0")
+	dir := writeLintFixture(t, map[string]string{"aa": namedBumpFixture("aa", srv.URL, "1.0.0")})
+	stubBumpListByName(t, map[string][]string{"aa": {"1.1.0", "1.0.0"}})
+	t.Chdir(dir)
+
+	_, errOut, err := runNem(t, nemHome, "catalog", "bump")
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	if !strings.Contains(errOut, "Checked 1 packages: 1 bumped, 0 up to date, 0 failed, 0 without discovery") {
+		t.Fatalf("stderr = %q, want sweep summary for the current directory", errOut)
+	}
+}
+
+// bumpJSONRow mirrors the --json contract rows for assertions.
+type bumpJSONRow struct {
+	Name    string   `json:"name"`
+	Path    string   `json:"path"`
+	Current string   `json:"current"`
+	Head    string   `json:"head"`
+	Added   []string `json:"added"`
+	Error   string   `json:"error"`
+}
+
+func decodeBumpRows(t *testing.T, out string) []bumpJSONRow {
+	t.Helper()
+	var rows []bumpJSONRow
+	if err := json.Unmarshal([]byte(out), &rows); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, out)
+	}
+	return rows
+}
+
+func TestCatalogBumpDirJSON(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.1.0")
+	dir := writeLintFixture(t, map[string]string{
+		"aa": namedBumpFixture("aa", srv.URL, "1.0.0"),
+		"bb": namedBumpFixture("bb", srv.URL, "2.0.0"),
+		"cc": namedBumpFixture("cc", srv.URL, "3.0.0"),
+		"dd": sweepFixture("dd", srv.URL, "1.0.0", false),
+	})
+	stubBumpListByName(t, map[string][]string{
+		"aa": {"1.1.0", "1.0.0"},
+		"bb": {"2.0.0"},
+	}) // cc absent → its discovery fails
+
+	out, _, err := runNem(t, nemHome, "catalog", "bump", "--json", dir)
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	rows := decodeBumpRows(t, out)
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3 (packages without discovery are not rows): %s", len(rows), out)
+	}
+	byName := map[string]bumpJSONRow{}
+	for _, r := range rows {
+		byName[r.Name] = r
+	}
+	aa := byName["aa"]
+	if aa.Current != "1.0.0" || aa.Head != "1.1.0" || len(aa.Added) != 1 || aa.Added[0] != "1.1.0" || aa.Error != "" {
+		t.Errorf("aa row = %+v, want current 1.0.0, head 1.1.0, added [1.1.0]", aa)
+	}
+	if want := filepath.Join(dir, "pkgs", "aa", "pkg.yaml"); aa.Path != want {
+		t.Errorf("aa path = %q, want %q", aa.Path, want)
+	}
+	bb := byName["bb"]
+	if bb.Current != "2.0.0" || bb.Head != "2.0.0" || len(bb.Added) != 0 || bb.Error != "" {
+		t.Errorf("bb row = %+v, want unchanged head 2.0.0 and no added versions", bb)
+	}
+	cc := byName["cc"]
+	if !strings.Contains(cc.Error, "discovery unavailable for cc") || cc.Head != "" || len(cc.Added) != 0 {
+		t.Errorf("cc row = %+v, want error and no head", cc)
+	}
+}
+
+func TestCatalogBumpDirRunsPackagesConcurrently(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t)
+	dir := writeLintFixture(t, map[string]string{
+		"aa": namedBumpFixture("aa", srv.URL, "1.0.0"),
+		"bb": namedBumpFixture("bb", srv.URL, "2.0.0"),
+	})
+	// Each discovery call parks until a second call is in flight; a
+	// sequential sweep never has two and times out into failures. aa
+	// then waits for bb to finish, so the row-order assertion below
+	// proves rows follow manifest order, not completion order.
+	gate := make(chan struct{})
+	bbDone := make(chan struct{})
+	stubBumpListFunc(t, func(_ context.Context, pkg *spec.Package) ([]string, error) {
+		select {
+		case gate <- struct{}{}:
+		case <-gate:
+		case <-time.After(2 * time.Second):
+			return nil, fmt.Errorf("no concurrent discovery for %s within 2s", pkg.Name)
+		}
+		if pkg.Name == "aa" {
+			<-bbDone
+			return []string{"1.0.0"}, nil
+		}
+		defer close(bbDone)
+		return []string{"2.0.0"}, nil
+	})
+
+	out, errOut, err := runNem(t, nemHome, "catalog", "bump", "--json", dir)
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	if !strings.Contains(errOut, "Checked 2 packages: 0 bumped, 2 up to date, 0 failed, 0 without discovery") {
+		t.Fatalf("stderr = %q, want both packages up to date (failures mean the sweep ran sequentially)", errOut)
+	}
+	rows := decodeBumpRows(t, out)
+	if len(rows) != 2 || rows[0].Name != "aa" || rows[1].Name != "bb" {
+		t.Fatalf("rows = %+v, want manifest order [aa bb] regardless of completion order", rows)
+	}
+}
+
+func TestCatalogBumpSingleFileJSON(t *testing.T) {
+	nemHome := t.TempDir()
+	srv, _ := bumpMultiArtifactServer(t, "1.8.3")
+	dir := writeLintFixture(t, map[string]string{"jq": bumpFixture(srv.URL)})
+	path := filepath.Join(dir, "pkgs", "jq", "pkg.yaml")
+	stubBumpList(t, "1.8.3", "1.8.2")
+
+	out, _, err := runNem(t, nemHome, "catalog", "bump", "--json", path)
+	if err != nil {
+		t.Fatalf("bump: %v", err)
+	}
+	rows := decodeBumpRows(t, out)
+	if len(rows) != 1 || rows[0].Name != "jq" || rows[0].Current != "1.8.2" || rows[0].Head != "1.8.3" {
+		t.Fatalf("rows = %+v, want one jq row 1.8.2 → 1.8.3", rows)
 	}
 }
 
