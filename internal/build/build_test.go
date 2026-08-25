@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io/fs"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -66,6 +68,50 @@ func TestBuildRunsStepsAndVerifies(t *testing.T) {
 	}
 	if res.SourceSha256 == "" {
 		t.Fatal("TOFU must report the computed sourceSha256")
+	}
+}
+
+// TestBuildStepPWDMatchesTheNemPaths pins $PWD to the path nem itself uses
+// for the source tree. A POSIX shell already replaces a PWD that does not
+// name its cwd, but it replaces it with getcwd(), which resolves symlinks —
+// so a step would otherwise reach its own directory by a different path than
+// $NEM_OUTPUT does. Test steps are documented to authors as being shaped
+// exactly like build steps, and they already set PWD; the two must agree.
+func TestBuildStepPWDMatchesTheNemPaths(t *testing.T) {
+	// A symlinked NEM_HOME is what makes the two paths differ; on macOS
+	// TempDir is already one, on Linux it is not.
+	linked := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(t.TempDir(), linked); err != nil {
+		t.Fatal(err)
+	}
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": linked}[k] })
+	tgz := makeTarGz(t, map[string]string{"src/x": "y"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1"}},
+		Build: &spec.Build{Output: "out", Steps: []spec.BuildStep{{Run: `
+mkdir -p "$NEM_OUTPUT"
+printf '%s\n%s\n' "$PWD" "$(dirname "$NEM_OUTPUT")" > "$NEM_OUTPUT/paths"
+`}}}}
+	pkg.Build.Source.URL = srv.URL
+
+	var b bytes.Buffer
+	res, err := Build(context.Background(), h, nil, nil, pkg, Options{Version: "v1"},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, b.String())
+	}
+	paths, err := os.ReadFile(filepath.Join(res.OutputDir, "paths"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(paths)), "\n")
+	if len(lines) != 2 || lines[0] != lines[1] {
+		t.Fatalf("step saw $PWD = %q, but nem names the same dir %q", lines[0], lines[len(lines)-1])
 	}
 }
 
@@ -358,5 +404,301 @@ func TestBuildRestampsAlreadyInstalledBuildDep(t *testing.T) {
 	}
 	if !depStamp.After(old) {
 		t.Fatalf("build did not refresh an already-installed dep's stamp: got %v, want after %v", depStamp, old)
+	}
+}
+
+// TestBuildTestHookPanicDoesNotLeakTheTempArchive proves the temp archive is
+// removed even when Build's own stack frame unwinds through a panic, not
+// just through a returned error.
+func TestBuildTestHookPanicDoesNotLeakTheTempArchive(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": nemHomeDir}[k] })
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1"}},
+		Build:    &spec.Build{Output: "out", Steps: []spec.BuildStep{{Run: `mkdir -p "$NEM_OUTPUT/bin"`}}},
+	}
+	pkg.Build.Source.URL = srv.URL
+
+	var gotArchive string
+	func() {
+		defer func() { recover() }()
+		var b bytes.Buffer
+		Build(context.Background(), h, nil, nil, pkg,
+			Options{Version: "v1", Test: func(_ context.Context, _ *spec.Package, _, artifactPath string) error {
+				gotArchive = artifactPath
+				panic("boom")
+			}},
+			report.New(&b, &b, report.Options{}), &b, &b)
+	}()
+
+	if gotArchive == "" {
+		t.Fatal("the test hook was never called")
+	}
+	if _, err := os.Stat(gotArchive); !os.IsNotExist(err) {
+		t.Fatalf("a panicking test hook must not leak the temp archive, stat err = %v", err)
+	}
+}
+
+func TestBuildTestHookGetsAnInstallableArchive(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": nemHomeDir}[k] })
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1"}},
+		Build:    &spec.Build{Output: "out", Steps: []spec.BuildStep{{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hi > "$NEM_OUTPUT/bin/tool"`}}},
+	}
+	pkg.Build.Source.URL = srv.URL
+
+	var gotArtifact string
+	var b bytes.Buffer
+	res, err := Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1", Test: func(_ context.Context, _ *spec.Package, _, artifactPath string) error {
+			gotArtifact = artifactPath
+			info, statErr := os.Stat(artifactPath)
+			if statErr != nil {
+				return statErr
+			}
+			if info.Size() == 0 {
+				return errors.New("archive is empty")
+			}
+			return nil
+		}},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err != nil {
+		t.Fatalf("Build: %v\n%s", err, b.String())
+	}
+	if gotArtifact == "" {
+		t.Fatal("the test hook was never called")
+	}
+	if _, err := os.Stat(filepath.Join(res.OutputDir, "bin", "tool")); err != nil {
+		t.Fatalf("output tree must be intact at Result.OutputDir: %v", err)
+	}
+	if _, err := os.Stat(gotArtifact); !os.IsNotExist(err) {
+		t.Fatalf("the temporary archive must be removed, stat err = %v", err)
+	}
+}
+
+// findDirNamed returns the path of the single directory under root whose
+// base name is want, failing t if there is not exactly one.
+func findDirNamed(t *testing.T, root, want string) string {
+	t.Helper()
+	var found string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == want {
+			if found != "" {
+				t.Fatalf("more than one %q directory under %s", want, root)
+			}
+			found = path
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	if found == "" {
+		t.Fatalf("no %q directory found under %s", want, root)
+	}
+	return found
+}
+
+// snapshotTree records the relative path and content of every regular file
+// under dir, for comparing a tree's state at two points in time.
+func snapshotTree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+	got := map[string]string{}
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		got[rel] = string(data)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return got
+}
+
+// TestBuildFailsWhenTheTestHookFails covers the design's promise that a
+// failing test leaves the build output tree exactly as it was: the hook
+// itself records the tree's contents (it runs after harvest would have
+// moved or deleted them on success, so this is the only point that sees
+// them at their final build location), and the assertions after Build
+// returns confirm nothing harvested, deleted, or rewrote them afterward.
+func TestBuildFailsWhenTheTestHookFails(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": nemHomeDir}[k] })
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1"}},
+		Build: &spec.Build{Output: "out", Steps: []spec.BuildStep{
+			{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hi > "$NEM_OUTPUT/bin/marker"`},
+		}},
+	}
+	pkg.Build.Source.URL = srv.URL
+
+	var outputDir string
+	var before map[string]string
+	var b bytes.Buffer
+	_, err := Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1", Test: func(context.Context, *spec.Package, string, string) error {
+			outputDir = findDirNamed(t, h.Tmp(), pkg.Build.Output)
+			before = snapshotTree(t, outputDir)
+			return errors.New("boom")
+		}},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("want the hook's error, got %v", err)
+	}
+	if outputDir == "" {
+		t.Fatal("the test hook was never called")
+	}
+	if _, statErr := os.Stat(outputDir); statErr != nil {
+		t.Fatalf("output tree must still be present after a failing test: %v", statErr)
+	}
+	after := snapshotTree(t, outputDir)
+	if !maps.Equal(before, after) {
+		t.Fatalf("output tree changed after a failing test:\nbefore: %v\nafter:  %v", before, after)
+	}
+}
+
+// TestBuildTestHookAndPushShareTheSameArchiveBytes proves the design's
+// claim that a package is tested as exactly the bytes it publishes: the
+// archive is built once and handed unchanged to both the test hook and the
+// registry push.
+func TestBuildTestHookAndPushShareTheSameArchiveBytes(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": nemHomeDir}[k] })
+
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := archivesOpener
+	archivesOpener = func(catalogRef, name string) (oras.Target, error) { return store, nil }
+	defer func() { archivesOpener = restore }()
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1.0.0"}},
+		Build: &spec.Build{Output: "out", Steps: []spec.BuildStep{
+			{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hello > "$NEM_OUTPUT/bin/tool"`},
+		}}}
+	pkg.Build.Source.URL = srv.URL
+
+	var hookBytes []byte
+	var b bytes.Buffer
+	res, err := Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1.0.0", Push: "ghcr.io/x/cat:v2",
+			Test: func(_ context.Context, _ *spec.Package, _, artifactPath string) error {
+				data, readErr := os.ReadFile(artifactPath)
+				if readErr != nil {
+					return readErr
+				}
+				hookBytes = data
+				return nil
+			}},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err != nil {
+		t.Fatalf("build with test hook and push: %v\n%s", err, b.String())
+	}
+	if !res.Pushed {
+		t.Fatal("Result.Pushed should be true")
+	}
+	if len(hookBytes) == 0 {
+		t.Fatal("the test hook never read the archive")
+	}
+
+	pulled, err := ocix.PullArchiveFrom(context.Background(), store, "v1.0.0", spec.Current(), t.TempDir())
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	pushedBytes, err := os.ReadFile(pulled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(hookBytes, pushedBytes) {
+		t.Fatal("bytes handed to the test hook differ from the bytes pushed")
+	}
+}
+
+// TestBuildFailingTestHookPushesNothing proves the design's promise that a
+// failing test blocks the publish entirely, even with --push set.
+func TestBuildFailingTestHookPushesNothing(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	h := home.Resolve(func(k string) string { return map[string]string{"NEM_HOME": nemHomeDir}[k] })
+
+	store, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restore := archivesOpener
+	archivesOpener = func(catalogRef, name string) (oras.Target, error) { return store, nil }
+	defer func() { archivesOpener = restore }()
+
+	tgz := makeTarGz(t, map[string]string{"src/README": "hi"})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+	defer srv.Close()
+
+	pkg := &spec.Package{Schema: 2, Name: "tool",
+		Artifact: spec.Artifact{OCI: ":{{.Version}}"},
+		Install:  []spec.Action{{Extract: &spec.ExtractAction{}}},
+		Versions: []spec.VersionEntry{{Version: "v1.0.0"}},
+		Build: &spec.Build{Output: "out", Steps: []spec.BuildStep{
+			{Run: `mkdir -p "$NEM_OUTPUT/bin" && echo hello > "$NEM_OUTPUT/bin/tool"`},
+		}}}
+	pkg.Build.Source.URL = srv.URL
+
+	var b bytes.Buffer
+	_, err = Build(context.Background(), h, nil, nil, pkg,
+		Options{Version: "v1.0.0", Push: "ghcr.io/x/cat:v2",
+			Test: func(context.Context, *spec.Package, string, string) error {
+				return errors.New("boom")
+			}},
+		report.New(&b, &b, report.Options{}), &b, &b)
+	if err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("want the hook's error, got %v", err)
+	}
+
+	if _, err := ocix.PullArchiveFrom(context.Background(), store, "v1.0.0", spec.Current(), t.TempDir()); !errors.Is(err, ocix.ErrArchiveNotFound) {
+		t.Fatalf("a failing test hook pushed something: pull err = %v, want %v", err, ocix.ErrArchiveNotFound)
 	}
 }

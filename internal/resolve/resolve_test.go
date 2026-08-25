@@ -623,10 +623,10 @@ versions: [v3.4.0]
 	}
 }
 
-// TestResolveBuildRolesRunVsLink mirrors TestResolveRolesRunVsLink but for
-// build.deps: ResolveBuild must assign roles via the same edge path
+// TestResolveDepsBuildRolesRunVsLink mirrors TestResolveRolesRunVsLink but
+// for build.deps: they must get their roles via the same edge path
 // (edgeContribution), not the direct-tool path.
-func TestResolveBuildRolesRunVsLink(t *testing.T) {
+func TestResolveDepsBuildRolesRunVsLink(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
 schema: 2
@@ -653,9 +653,9 @@ versions: [v1.0.0]
 			},
 		},
 	}
-	res, err := resolve.ResolveBuild(context.Background(), pkg, namedSources(root))
+	res, err := resolve.ResolveDeps(context.Background(), pkg, pkg.Build.Deps, namedSources(root))
 	if err != nil {
-		t.Fatalf("ResolveBuild: %v", err)
+		t.Fatalf("ResolveDeps: %v", err)
 	}
 	openssl := entry(t, res, "openssl")
 	makePkg := entry(t, res, "make")
@@ -987,10 +987,10 @@ versions: [v4.0.0, v3.5.1]
 	}
 }
 
-// TestResolveBuildBareDepDefersToExactDep mirrors floating semantics on the
-// build-deps path: a bare build dep must not float a package above another
-// edge's exact version requirement.
-func TestResolveBuildBareDepDefersToExactDep(t *testing.T) {
+// TestResolveDepsBareBuildDepDefersToExactDep mirrors floating semantics on
+// the build-deps path: a bare build dep must not float a package above
+// another edge's exact version requirement.
+func TestResolveDepsBareBuildDepDefersToExactDep(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
 schema: 2
@@ -1019,9 +1019,9 @@ versions: [v1.0.0]
 			},
 		},
 	}
-	res, err := resolve.ResolveBuild(context.Background(), pkg, namedSources(root))
+	res, err := resolve.ResolveDeps(context.Background(), pkg, pkg.Build.Deps, namedSources(root))
 	if err != nil {
-		t.Fatalf("ResolveBuild: %v", err)
+		t.Fatalf("ResolveDeps: %v", err)
 	}
 	if a := entry(t, res, "a"); a.Version != "v1.0.0" {
 		t.Fatalf("bare build dep floated a to %s over b's exact v1.0.0", a.Version)
@@ -1312,5 +1312,40 @@ versions:
 	}
 	if a := entry(t, res, "a"); a.Version != "v2.0.0" || !a.Direct {
 		t.Fatalf("entry a: %+v", a)
+	}
+}
+
+func TestResolveDepsWalksTheGivenList(t *testing.T) {
+	root := t.TempDir()
+	writePkg(t, root, `
+schema: 2
+name: alpha
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	writePkg(t, root, `
+schema: 2
+name: beta
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v2.0.0]
+`)
+	pkg := &spec.Package{
+		Schema: 2,
+		Name:   "tool",
+		Deps:   []spec.Dep{{Name: "alpha"}},
+		Build:  &spec.Build{Deps: []spec.Dep{{Name: "beta"}}},
+	}
+
+	res, err := resolve.ResolveDeps(context.Background(), pkg, pkg.Deps, namedSources(root))
+	if err != nil {
+		t.Fatalf("ResolveDeps: %v", err)
+	}
+	if len(res.Entries) != 1 {
+		t.Fatalf("want exactly the runtime dep, got %+v", res.Entries)
+	}
+	if got := entry(t, res, "alpha"); got.Version != "v1.0.0" {
+		t.Fatalf("alpha version = %q", got.Version)
 	}
 }

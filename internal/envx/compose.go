@@ -65,7 +65,7 @@ func Compose(project, global *project.Manifest, projectLock, globalLock *project
 	}
 	sort.Strings(names)
 
-	result := Result{Path: path, LoaderVar: loaderPathVar(), LoaderPath: loaderPath, Warnings: warnings}
+	result := Result{Path: path, LoaderVar: LoaderPathVar(), LoaderPath: loaderPath, Warnings: warnings}
 	for _, name := range names {
 		result.Vars = append(result.Vars, Var{Name: name, Value: vars[name], Source: sources[name]})
 	}
@@ -110,7 +110,7 @@ func ComposeScope(scope, other *project.Manifest, scopeLock, otherLock *project.
 
 	result := Result{
 		Path:       buildPath(resolvedScope, nil),
-		LoaderVar:  loaderPathVar(),
+		LoaderVar:  LoaderPathVar(),
 		LoaderPath: buildLoaderPath(resolvedScope, nil),
 		Warnings:   warnings,
 	}
@@ -253,9 +253,9 @@ func buildLoaderPath(projectEntries, globalEntries []resolvedEntry) []string {
 	return out
 }
 
-// loaderPathVar is the platform's dynamic-linker search variable: nem sets
+// LoaderPathVar is the platform's dynamic-linker search variable: nem sets
 // this one directly from buildLoaderPath, never via a package export.
-func loaderPathVar() string {
+func LoaderPathVar() string {
 	if spec.Current().OS == "darwin" {
 		return "DYLD_LIBRARY_PATH"
 	}
@@ -276,7 +276,7 @@ func applyPackageExports(entries []resolvedEntry, vars, sources map[string]strin
 				*warnings = append(*warnings, fmt.Sprintf("reserved env var %q from %s skipped", export.Name, r.name))
 				continue
 			}
-			value, err := renderEnvTemplate(export.Value, r.installDir, r.version)
+			value, err := RenderEnvTemplate(export.Value, r.installDir, r.version)
 			if err != nil {
 				*warnings = append(*warnings, fmt.Sprintf("reinstall %s: %v", r.name, err))
 				continue
@@ -300,9 +300,12 @@ var envTemplateFuncs = template.FuncMap{
 	"replace":    func(s, old, new string) string { return strings.ReplaceAll(s, old, new) },
 }
 
-// renderEnvTemplate expands a package env export's raw value template
-// against InstallDir and Version, erroring on any unresolved field.
-func renderEnvTemplate(tmpl, installDir, version string) (string, error) {
+// RenderEnvTemplate expands a package env export's raw value template
+// against InstallDir and Version, erroring on any unresolved field. This is
+// the one implementation of that expansion; a caller composing exports
+// against a directory other than the real install dir (nem-cli's package
+// test run, for one) still goes through it rather than its own copy.
+func RenderEnvTemplate(tmpl, installDir, version string) (string, error) {
 	t, err := template.New("").Funcs(envTemplateFuncs).Option("missingkey=error").Parse(tmpl)
 	if err != nil {
 		return "", fmt.Errorf("parse template %q: %w", tmpl, err)

@@ -21,8 +21,9 @@ func reasons(p Plan) map[string]string {
 
 func TestBuildTierZeroClassifiesEverySource(t *testing.T) {
 	s := Store{
-		Staging:  []Item{{Path: "/tmp/go-build-1", Newest: ago(48 * time.Hour), Size: 100}},
-		Partials: []Item{{Path: "/pkgs/go/1.26.6-x.tmp", Newest: ago(48 * time.Hour), Size: 10}},
+		Staging:      []Item{{Path: "/tmp/go-build-1", Newest: ago(48 * time.Hour), Size: 100}},
+		Partials:     []Item{{Path: "/pkgs/go/1.26.6-x.tmp", Newest: ago(48 * time.Hour), Size: 10}},
+		TestInstalls: []Item{{Path: "/pkgs/tool-NEMTEST-1", Newest: ago(48 * time.Hour), Size: 5}},
 	}
 	p := Build(s, usage.Index{}, Options{Grace: time.Hour}, now)
 
@@ -30,17 +31,30 @@ func TestBuildTierZeroClassifiesEverySource(t *testing.T) {
 	want := map[string]string{
 		"/tmp/go-build-1":       "leaked staging",
 		"/pkgs/go/1.26.6-x.tmp": "partial install",
+		"/pkgs/tool-NEMTEST-1":  "leftover test install",
 	}
 	for path, reason := range want {
 		if got[path] != reason {
 			t.Errorf("%s: reason = %q, want %q", path, got[path], reason)
 		}
 	}
-	if p.Total() != 110 {
-		t.Errorf("Total() = %d, want 110", p.Total())
+	if p.Total() != 115 {
+		t.Errorf("Total() = %d, want 115", p.Total())
 	}
 	if p.Confirm {
 		t.Error("tier 0 must not set Confirm")
+	}
+}
+
+func TestBuildSkipsTestInstallsInsideGrace(t *testing.T) {
+	s := Store{TestInstalls: []Item{
+		{Path: "/pkgs/tool-NEMTEST-live", Newest: ago(30 * time.Minute)},
+		{Path: "/pkgs/tool-NEMTEST-dead", Newest: ago(90 * time.Minute)},
+	}}
+	p := Build(s, usage.Index{}, Options{Grace: time.Hour}, now)
+
+	if len(p.Entries) != 1 || p.Entries[0].Path != "/pkgs/tool-NEMTEST-dead" {
+		t.Fatalf("grace window wrong, planned %v", p.Entries)
 	}
 }
 

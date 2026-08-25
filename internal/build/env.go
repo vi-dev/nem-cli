@@ -10,32 +10,36 @@ import (
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
-// resolvedDep is one build dependency after resolution and install: its
-// prefix plus the role that decides its build-env contribution. Bins join
-// the build PATH for both roles — C libraries ship foo-config discovery
-// scripts meant to be executed at build time.
-type resolvedDep struct {
+// ResolvedDep is one dependency after resolution and install: its prefix
+// plus the role that decides its environment contribution. Bins join the
+// PATH for both roles — C libraries ship foo-config discovery scripts meant
+// to be executed at build time.
+type ResolvedDep struct {
 	Name, Version, Prefix string
 	OnPath                bool // a tool
 	OnLoaderPath          bool // a library: contributes -I/-L/rpath/pkgconfig
 	Bins, Libs            []string
 }
 
-// buildContext is the invariant context of one build.
-type buildContext struct {
+// EnvContext is the invariant context of one composed environment.
+type EnvContext struct {
 	Version    string
 	Platform   spec.Platform
-	Prefix     string // the eventual packages/<name>/<version> install dir
-	StagingDir string
-	OutputDir  string
+	Prefix     string // the packages/<name>/<version> dir the package occupies
+	StagingDir string // exported as NEM_STAGING_DIR; omitted when empty
+	OutputDir  string // exported as NEM_OUTPUT; omitted when empty
+	// AbsRpath links against each dep's absolute lib dir instead of the
+	// relative path an installed artifact needs. A program compiled by a
+	// test step lives in a scratch dir with no fixed path back to packages/.
+	AbsRpath bool
 }
 
-// composeBuildEnv overlays the build scaffold onto base (the author's own
+// ComposeEnv overlays nem's dependency scaffold onto base (the caller's own
 // environment): every dep's bins prepended to PATH, each dep's prefix as
 // NEM_DEP_<NAME>_PREFIX, and each library dep's include/lib/pkgconfig flags —
 // make-escaped in CPPFLAGS/CFLAGS/LDFLAGS, exec-safe in CGO_CFLAGS/CGO_LDFLAGS.
 // Existing values are appended to, never clobbered.
-func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []string {
+func ComposeEnv(base []string, deps []ResolvedDep, ectx EnvContext) []string {
 	vars := envToMap(base)
 
 	var pathDirs []string
@@ -69,8 +73,13 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 				cgoLdflags = append(cgoLdflags, "-Wl,-rpath-link,"+dir)
 				newDTags = true
 			}
-			ldflags = append(ldflags, rpathFlag(d.Name, d.Version, lib))
-			cgoLdflags = append(cgoLdflags, cgoRpathFlag(d.Name, d.Version, lib))
+			if ectx.AbsRpath {
+				ldflags = append(ldflags, "-Wl,-rpath,"+dir)
+				cgoLdflags = append(cgoLdflags, "-Wl,-rpath,"+dir)
+			} else {
+				ldflags = append(ldflags, rpathFlag(d.Name, d.Version, lib))
+				cgoLdflags = append(cgoLdflags, cgoRpathFlag(d.Name, d.Version, lib))
+			}
 		}
 	}
 	if newDTags {
@@ -86,12 +95,16 @@ func composeBuildEnv(base []string, deps []resolvedDep, bctx buildContext) []str
 	appendVar(vars, "CGO_LDFLAGS", cgoLdflags, " ")
 	appendVar(vars, "PKG_CONFIG_PATH", pkgcfg, string(filepath.ListSeparator))
 
-	vars["NEM_VERSION"] = bctx.Version
-	vars["NEM_OS"] = bctx.Platform.OS
-	vars["NEM_ARCH"] = bctx.Platform.Arch
-	vars["NEM_PREFIX"] = bctx.Prefix
-	vars["NEM_STAGING_DIR"] = bctx.StagingDir
-	vars["NEM_OUTPUT"] = bctx.OutputDir
+	vars["NEM_VERSION"] = ectx.Version
+	vars["NEM_OS"] = ectx.Platform.OS
+	vars["NEM_ARCH"] = ectx.Platform.Arch
+	vars["NEM_PREFIX"] = ectx.Prefix
+	if ectx.StagingDir != "" {
+		vars["NEM_STAGING_DIR"] = ectx.StagingDir
+	}
+	if ectx.OutputDir != "" {
+		vars["NEM_OUTPUT"] = ectx.OutputDir
+	}
 
 	return mapToEnv(vars)
 }
@@ -184,4 +197,22 @@ func appendVar(m map[string]string, key string, parts []string, sep string) {
 	} else {
 		m[key] = add
 	}
+}
+
+// ScrubEnv drops each key in drop from env, then appends overrides (each a
+// "key=value" entry), so the result carries none of the dropped keys except
+// where an override reintroduces one deliberately.
+func ScrubEnv(env []string, drop []string, overrides ...string) []string {
+	dropped := make(map[string]bool, len(drop))
+	for _, k := range drop {
+		dropped[k] = true
+	}
+	out := make([]string, 0, len(env)+len(overrides))
+	for _, kv := range env {
+		if k, _, ok := strings.Cut(kv, "="); ok && dropped[k] {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return append(out, overrides...)
 }

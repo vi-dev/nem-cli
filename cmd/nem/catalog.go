@@ -41,7 +41,7 @@ func newCatalogCmd() *cobra.Command {
 		&cobra.Group{ID: catalogGroupMaintenance, Title: "Catalog maintenance:"},
 	)
 	addGrouped(cmd, catalogGroupConsumption, newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogDisableCmd(), newCatalogEnableCmd())
-	addGrouped(cmd, catalogGroupMaintenance, newCatalogLintCmd(), newCatalogFmtCmd(), newCatalogBuildCmd(), newCatalogBumpCmd(), newCatalogOutdatedCmd(), newCatalogMissingCmd(), newCatalogDiffCmd(), newCatalogPublishCmd())
+	addGrouped(cmd, catalogGroupMaintenance, newCatalogLintCmd(), newCatalogFmtCmd(), newCatalogBuildCmd(), newCatalogTestCmd(), newCatalogBumpCmd(), newCatalogOutdatedCmd(), newCatalogMissingCmd(), newCatalogDiffCmd(), newCatalogPublishCmd())
 	return cmd
 }
 

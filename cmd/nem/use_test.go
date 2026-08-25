@@ -103,8 +103,10 @@ func makeTarGz(t *testing.T, files map[string]string) []byte {
 
 // downloadableDirCatalog writes a dir catalog rooted at a temp dir holding
 // one package, "tool", whose artifact is a real tar.gz served by an
-// httptest server, with sha256 computed from the archive bytes.
-func downloadableDirCatalog(t *testing.T) string {
+// httptest server, with sha256 computed from the archive bytes. extraYAML,
+// when non-empty, is appended at the manifest's top level — e.g. a "test:"
+// block — after the versions section.
+func downloadableDirCatalog(t *testing.T, extraYAML string) string {
 	t.Helper()
 	archive := makeTarGz(t, map[string]string{"bin/tool": "tool binary bytes"})
 	sum := sha256.Sum256(archive)
@@ -135,7 +137,7 @@ versions:
       darwin/amd64: "` + sha + `"
       linux/arm64: "` + sha + `"
       linux/amd64: "` + sha + `"
-`
+` + extraYAML
 	if err := os.WriteFile(filepath.Join(dir, "pkg.yaml"), []byte(pkgYAML), 0o644); err != nil {
 		t.Fatalf("write pkg.yaml: %v", err)
 	}
@@ -153,7 +155,7 @@ func testNemHome(nemHomeDir string) home.Home {
 
 func TestUseCreatesManifestLockAndInstalls(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -212,7 +214,7 @@ func TestUseCreatesManifestLockAndInstalls(t *testing.T) {
 
 func TestUseUnknownVersionFails(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -237,7 +239,7 @@ func TestUseUnknownVersionFails(t *testing.T) {
 
 func TestUnuseRemovesFromManifestAndLock(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -390,7 +392,7 @@ func TestUseColdAutoSyncsUnsyncedOCICatalogBeforeResolve(t *testing.T) {
 // pinned to a package another catalog already provides.
 func TestUseColdAutoSyncFailureDoesNotAbortWhenToolResolvesElsewhere(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -467,7 +469,7 @@ func TestUseColdAutoSyncFailureSurfacesAtResolveWhenToolOnlyThere(t *testing.T) 
 // resolution.
 func TestUseColdAutoSyncFailureSkippedWhenToolResolvesInLaterCatalog(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -534,7 +536,7 @@ func TestUseUnqualifiedSurfacesNotSyncedWhenToolOnlyInUnsyncedCatalog(t *testing
 
 func TestUseIgnoresDisabledCatalog(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 

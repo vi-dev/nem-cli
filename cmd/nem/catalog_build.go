@@ -1,18 +1,20 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/build"
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/pkgtest"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
 func newCatalogBuildCmd() *cobra.Command {
 	var version, output, sourceSha, push string
-	var dryRun, force bool
+	var dryRun, force, noTest bool
 	cmd := &cobra.Command{
 		Use:   "build <pkg.yaml>",
 		Short: "Build a source package's recipe on the host platform",
@@ -26,6 +28,9 @@ func newCatalogBuildCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := pkg.Validate(); err != nil {
+				return err
+			}
 			cfg, err := catalog.OpenConfig(nemHome)
 			if err != nil {
 				return err
@@ -34,9 +39,23 @@ func newCatalogBuildCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := build.Build(cmd.Context(), nemHome, cfg, sources, pkg,
-				build.Options{Version: version, Output: output, SourceSha256: sourceSha,
-					Push: push, DryRun: dryRun, Force: force},
+			opts := build.Options{Version: version, Output: output, SourceSha256: sourceSha,
+				Push: push, DryRun: dryRun, Force: force}
+			// Only set when the manifest declares tests: installing the hook
+			// makes Build archive the output tree even for zero test steps.
+			if !noTest && len(pkg.Test) > 0 {
+				opts.Test = func(ctx context.Context, p *spec.Package, v, artifactPath string) error {
+					// The local manifest is authoritative: the artifact under
+					// test was just built from it.
+					deps, err := build.ResolveDeps(ctx, nemHome, cfg, sources, console, p, p.Deps)
+					if err != nil {
+						return err
+					}
+					return runPkgTest(ctx, nemHome, deps, p, v, "", artifactPath,
+						console, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				}
+			}
+			res, err := build.Build(cmd.Context(), nemHome, cfg, sources, pkg, opts,
 				console, cmd.OutOrStdout(), cmd.ErrOrStderr())
 			if err != nil {
 				return err
@@ -57,6 +76,7 @@ func newCatalogBuildCmd() *cobra.Command {
 	cmd.Flags().StringVar(&push, "push", "", "publish the built archive to this catalog registry ref")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "with --push, report the plan without writing")
 	cmd.Flags().BoolVar(&force, "force", false, "with --push, overwrite an unchanged platform entry")
+	cmd.Flags().BoolVar(&noTest, "no-test", false, "skip the package's declared test steps")
 	return cmd
 }
 
@@ -71,3 +91,7 @@ func hasVersionEntry(pkg *spec.Package, v string) bool {
 
 // readFile is a package var so tests need not touch disk when preferable.
 var readFile = os.ReadFile
+
+// runPkgTest is a package var so tests can prove whether the build's test
+// hook ran at all, without a live pkgtest install.
+var runPkgTest = pkgtest.InstallAndRun

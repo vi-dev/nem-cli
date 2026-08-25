@@ -17,7 +17,8 @@ type Package struct {
 	Bins             []string // dirs or files exposed on PATH; default ["bin"]
 	Libs             []string // dirs contributing to the loader path; nil = none
 	Env              []EnvExport
-	Build            *Build // nil when absent
+	Build            *Build     // nil when absent
+	Test             []TestStep // commands proving the installed package works
 }
 
 // DepKind is how a dependent consumes a dependency: run (execute its
@@ -124,6 +125,15 @@ type Build struct {
 // BuildStep is one shell command of a source build, optionally
 // platform-constrained.
 type BuildStep struct {
+	Run       string
+	Platforms []Platform
+}
+
+// TestStep is one shell command proving an installed package works,
+// optionally platform-constrained. It mirrors BuildStep's shape but runs
+// in a different environment: against an installed tree at $NEM_PREFIX
+// rather than a source tree at $NEM_OUTPUT.
+type TestStep struct {
 	Run       string
 	Platforms []Platform
 }

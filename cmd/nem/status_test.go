@@ -81,7 +81,7 @@ func TestStatusCatalogSwitchShowsUnlocked(t *testing.T) {
 
 func TestStatusInstalledColumn(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 

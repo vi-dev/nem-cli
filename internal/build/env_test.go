@@ -18,17 +18,17 @@ func envMap(env []string) map[string]string {
 	return m
 }
 
-func TestComposeBuildEnv(t *testing.T) {
-	deps := []resolvedDep{
+func TestComposeEnv(t *testing.T) {
+	deps := []ResolvedDep{
 		{Name: "make", Version: "v4", Prefix: "/nh/packages/make/v4", OnPath: true, Bins: []string{"bin"}},
 		{Name: "openssl", Version: "v3.4.0", Prefix: "/nh/packages/openssl/v3.4.0", OnLoaderPath: true, Bins: []string{"bin"}, Libs: []string{"lib"}},
 		{Name: "libgpg-error", Version: "1.51", Prefix: "/nh/packages/libgpg-error/1.51", OnLoaderPath: true},
 	}
-	bctx := buildContext{
+	ectx := EnvContext{
 		Version: "v1.2.3", Platform: spec.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
 		Prefix: "/nh/packages/tool/v1.2.3", StagingDir: "/tmp/stg", OutputDir: "/tmp/stg/dist",
 	}
-	env := composeBuildEnv([]string{"PATH=/usr/bin", "CPPFLAGS=-DBASE", "CGO_LDFLAGS=-lbase"}, deps, bctx)
+	env := ComposeEnv([]string{"PATH=/usr/bin", "CPPFLAGS=-DBASE", "CGO_LDFLAGS=-lbase"}, deps, ectx)
 	m := envMap(env)
 
 	if !strings.HasPrefix(m["PATH"], "/nh/packages/make/v4/bin:") {
@@ -100,5 +100,68 @@ func TestComposeBuildEnv(t *testing.T) {
 		if m[k] != want {
 			t.Errorf("%s = %q, want %q", k, m[k], want)
 		}
+	}
+}
+
+func TestComposeEnvOmitsEmptyStagingAndOutput(t *testing.T) {
+	env := ComposeEnv(nil, nil, EnvContext{
+		Version: "v1", Platform: spec.Platform{OS: "linux", Arch: "amd64"}, Prefix: "/p",
+	})
+	m := envMap(env)
+	if _, ok := m["NEM_STAGING_DIR"]; ok {
+		t.Fatal("NEM_STAGING_DIR must be omitted when StagingDir is empty")
+	}
+	if _, ok := m["NEM_OUTPUT"]; ok {
+		t.Fatal("NEM_OUTPUT must be omitted when OutputDir is empty")
+	}
+	if v := m["NEM_PREFIX"]; v != "/p" {
+		t.Fatalf("NEM_PREFIX = %q", v)
+	}
+}
+
+func TestComposeEnvSetsStagingAndOutputWhenPresent(t *testing.T) {
+	env := ComposeEnv(nil, nil, EnvContext{
+		Version: "v1", Platform: spec.Platform{OS: "linux", Arch: "amd64"},
+		Prefix: "/p", StagingDir: "/s", OutputDir: "/o",
+	})
+	m := envMap(env)
+	if v := m["NEM_STAGING_DIR"]; v != "/s" {
+		t.Fatalf("NEM_STAGING_DIR = %q", v)
+	}
+	if v := m["NEM_OUTPUT"]; v != "/o" {
+		t.Fatalf("NEM_OUTPUT = %q", v)
+	}
+}
+
+func TestComposeEnvAbsRpathUsesAbsolutePaths(t *testing.T) {
+	deps := []ResolvedDep{{
+		Name: "foo", Version: "v1", Prefix: "/nem/packages/foo/v1",
+		OnLoaderPath: true, Libs: []string{"lib"},
+	}}
+	ectx := EnvContext{
+		Version: "v1", Platform: spec.Platform{OS: "linux", Arch: "amd64"},
+		Prefix: "/nem/packages/tool/v2", AbsRpath: true,
+	}
+	ldflags := envMap(ComposeEnv(nil, deps, ectx))["LDFLAGS"]
+	if !strings.Contains(ldflags, "-Wl,-rpath,/nem/packages/foo/v1/lib") {
+		t.Fatalf("want an absolute rpath, got %q", ldflags)
+	}
+	if strings.Contains(ldflags, "ORIGIN") || strings.Contains(ldflags, "@loader_path") {
+		t.Fatalf("absolute mode must emit no relative rpath, got %q", ldflags)
+	}
+}
+
+func TestComposeEnvRelativeRpathIsTheDefault(t *testing.T) {
+	deps := []ResolvedDep{{
+		Name: "foo", Version: "v1", Prefix: "/nem/packages/foo/v1",
+		OnLoaderPath: true, Libs: []string{"lib"},
+	}}
+	ectx := EnvContext{
+		Version: "v1", Platform: spec.Platform{OS: "linux", Arch: "amd64"},
+		Prefix: "/nem/packages/tool/v2",
+	}
+	ldflags := envMap(ComposeEnv(nil, deps, ectx))["LDFLAGS"]
+	if !strings.Contains(ldflags, "/../../../foo/v1/lib") {
+		t.Fatalf("want a relative rpath by default, got %q", ldflags)
 	}
 }

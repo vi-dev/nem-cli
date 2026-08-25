@@ -29,6 +29,9 @@ type Store struct {
 	Downloads []Item
 	Partials  []Item
 	Versions  []Version
+	// TestInstalls are throwaway aliased installations a package test run
+	// leaves behind under packages/ — see home.TestInstallInfix.
+	TestInstalls []Item
 }
 
 // Options are the flag-derived knobs. Unused is zero when --unused was not
@@ -84,6 +87,7 @@ func Build(s Store, idx usage.Index, opts Options, now time.Time) Plan {
 		{items: s.Staging, reason: "leaked staging"},
 		{items: s.Downloads, reason: "leaked download"},
 		{items: s.Partials, reason: "partial install"},
+		{items: s.TestInstalls, reason: "leftover test install"},
 	} {
 		for _, it := range group.items {
 			if now.Sub(it.Newest) < opts.Grace {

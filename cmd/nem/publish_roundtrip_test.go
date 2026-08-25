@@ -33,7 +33,7 @@ func TestPublishToUseRoundTrip(t *testing.T) {
 		t.Fatalf("oci.New: %v", err)
 	}
 
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 
 	restorePublish := publish.SetTargetOpenerForTest(func(context.Context, string) (oras.Target, error) {
 		return shared, nil

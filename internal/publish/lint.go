@@ -98,6 +98,7 @@ func lintPackage(id, path string, checkDirName bool) []Finding {
 	findings = append(findings, lintTemplates(id, pkg)...)
 	findings = append(findings, lintReservedEnv(id, pkg)...)
 	findings = append(findings, lintVersionOrder(id, pkg)...)
+	findings = append(findings, lintTestSteps(id, pkg)...)
 	return findings
 }
 
@@ -112,6 +113,36 @@ func lintVersionOrder(id string, pkg *spec.Package) []Finding {
 			findings = append(findings, Finding{
 				Pkg: id,
 				Msg: fmt.Sprintf("versions are not newest-first: %s precedes %s", prev, cur),
+			})
+		}
+	}
+	return findings
+}
+
+// lintTestSteps reports test steps whose own platform constraint excludes
+// every platform the package supports — such a step would never run. A step
+// with no constraint of its own is never dead.
+func lintTestSteps(id string, pkg *spec.Package) []Finding {
+	if len(pkg.Test) == 0 {
+		return nil
+	}
+	supported := pkg.SupportedBy()
+	var findings []Finding
+	for i, s := range pkg.Test {
+		if len(s.Platforms) == 0 {
+			continue
+		}
+		dead := true
+		for _, plat := range supported {
+			if spec.PlatformsInclude(s.Platforms, plat) {
+				dead = false
+				break
+			}
+		}
+		if dead {
+			findings = append(findings, Finding{
+				Pkg: id,
+				Msg: fmt.Sprintf("test[%d] applies to none of the package's platforms", i),
 			})
 		}
 	}

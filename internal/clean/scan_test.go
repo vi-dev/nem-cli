@@ -3,6 +3,7 @@ package clean
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -143,13 +144,92 @@ func TestScanWithoutVersionsSkipsVersionTreesButKeepsPartials(t *testing.T) {
 	}
 }
 
+func TestScanSweepsTestInstallAliases(t *testing.T) {
+	h, root := scanHome(t)
+	alias := filepath.Join(root, "packages", "tool"+home.TestInstallInfix+"12345", "v1")
+	writeFile(t, filepath.Join(alias, "marker"), "x")
+	real := filepath.Join(root, "packages", "tool", "v1")
+	writeFile(t, filepath.Join(real, "bin", "tool"), "x")
+
+	s, err := Scan(h, true)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	wantAlias := filepath.Join(root, "packages", "tool"+home.TestInstallInfix+"12345")
+	var found bool
+	for _, it := range s.TestInstalls {
+		if it.Path == wantAlias {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("alias dir not swept; TestInstalls = %+v", s.TestInstalls)
+	}
+	for _, v := range s.Versions {
+		if strings.Contains(v.Path, home.TestInstallInfix) {
+			t.Fatalf("alias must not appear as an installed version: %+v", v)
+		}
+	}
+	var sawReal bool
+	for _, v := range s.Versions {
+		if v.Path == real {
+			sawReal = true
+		}
+	}
+	if !sawReal {
+		t.Fatalf("the real install must still be reported as a version; Versions = %+v", s.Versions)
+	}
+}
+
+func TestScanTreatsOnlyUppercaseNemtestInfixAsAnAlias(t *testing.T) {
+	h, root := scanHome(t)
+
+	// "tool-nemtest-cli" is a valid package name under spec.NameRE
+	// (lowercase-only) and must not be mistaken for a test alias.
+	lowercase := filepath.Join(root, "packages", "tool-nemtest-cli", "v1")
+	writeFile(t, filepath.Join(lowercase, "bin", "tool-nemtest-cli"), "x")
+
+	alias := filepath.Join(root, "packages", "tool"+home.TestInstallInfix+"12345", "v1")
+	writeFile(t, filepath.Join(alias, "marker"), "x")
+
+	s, err := Scan(h, true)
+	if err != nil {
+		t.Fatalf("Scan: %v", err)
+	}
+
+	wantAlias := filepath.Join(root, "packages", "tool"+home.TestInstallInfix+"12345")
+	var sweptAlias bool
+	for _, it := range s.TestInstalls {
+		if it.Path == wantAlias {
+			sweptAlias = true
+		}
+		if it.Path == filepath.Join(root, "packages", "tool-nemtest-cli") {
+			t.Fatalf("a lowercase-only package name must never be swept as an alias: %+v", it)
+		}
+	}
+	if !sweptAlias {
+		t.Fatalf("the uppercase alias dir must still be swept; TestInstalls = %+v", s.TestInstalls)
+	}
+
+	var sawLowercase bool
+	for _, v := range s.Versions {
+		if v.Path == lowercase {
+			sawLowercase = true
+		}
+	}
+	if !sawLowercase {
+		t.Fatalf("tool-nemtest-cli must still be reported as an installed version; Versions = %+v", s.Versions)
+	}
+}
+
 func TestScanOnEmptyHomeIsNotAnError(t *testing.T) {
 	h, _ := scanHome(t)
 	s, err := Scan(h, true)
 	if err != nil {
 		t.Fatalf("Scan on empty home: %v", err)
 	}
-	if len(s.Staging)+len(s.Partials)+len(s.Versions) != 0 {
+	if len(s.Staging)+len(s.Partials)+len(s.Versions)+len(s.TestInstalls) != 0 {
 		t.Fatalf("empty home yielded %+v", s)
 	}
 }

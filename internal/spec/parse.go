@@ -22,6 +22,7 @@ type rawPackage struct {
 	Libs             []string                     `yaml:"libs"`
 	Env              []rawEnv                     `yaml:"env"`
 	Build            *rawBuild                    `yaml:"build"`
+	Test             []rawTestStep                `yaml:"test"`
 	Versions         []yaml.RawMessage            `yaml:"versions"`
 }
 
@@ -64,6 +65,11 @@ type rawBuild struct {
 	} `yaml:"steps"`
 	Output    string `yaml:"output"`
 	Normalize *bool  `yaml:"normalize"`
+}
+
+type rawTestStep struct {
+	Run       string   `yaml:"run"`
+	Platforms []string `yaml:"platforms"`
 }
 
 type rawVersionEntry struct {
@@ -140,6 +146,13 @@ func Parse(data []byte) (*Package, error) {
 			b.Steps = append(b.Steps, BuildStep{Run: s.Run, Platforms: plats})
 		}
 		p.Build = b
+	}
+	for i, s := range raw.Test {
+		plats, err := parsePlatforms(s.Platforms)
+		if err != nil {
+			return nil, fmt.Errorf("test[%d]: %w", i, err)
+		}
+		p.Test = append(p.Test, TestStep{Run: s.Run, Platforms: plats})
 	}
 	for i, v := range raw.Versions {
 		entry, err := shapeVersion(v)

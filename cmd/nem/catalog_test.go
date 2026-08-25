@@ -169,7 +169,7 @@ func TestCatalogUpdateSkipsDisabled(t *testing.T) {
 
 func TestCatalogDisableEnable(t *testing.T) {
 	dir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	if _, _, err := runNem(t, dir, "catalog", "add", "tools", catalogRoot); err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +220,8 @@ func TestCatalogListShowsStatus(t *testing.T) {
 
 func TestCatalogDisableMakesUseResolveElsewhere(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	rootA := downloadableDirCatalog(t)
-	rootB := downloadableDirCatalog(t)
+	rootA := downloadableDirCatalog(t, "")
+	rootB := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -290,6 +290,7 @@ func TestCatalogCommandGroupMembership(t *testing.T) {
 		"lint":     catalogGroupMaintenance,
 		"fmt":      catalogGroupMaintenance,
 		"build":    catalogGroupMaintenance,
+		"test":     catalogGroupMaintenance,
 		"bump":     catalogGroupMaintenance,
 		"outdated": catalogGroupMaintenance,
 		"missing":  catalogGroupMaintenance,

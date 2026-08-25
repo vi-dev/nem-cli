@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strings"
 )
 
 // EnvNameRE validates environment variable names.
@@ -177,6 +178,11 @@ func (p *Package) Validate() error {
 			return fmt.Errorf("dep %q: invalid compat %q", d.Name, d.Compat)
 		}
 	}
+	for i, s := range p.Test {
+		if strings.TrimSpace(s.Run) == "" {
+			return fmt.Errorf("test[%d]: run is required", i)
+		}
+	}
 	if b := p.Build; b != nil {
 		if b.Source.URL == "" {
 			return errors.New("build.source.url is required")
@@ -191,7 +197,7 @@ func (p *Package) Validate() error {
 			return errors.New("build.steps is required and must be non-empty")
 		}
 		for i, s := range b.Steps {
-			if s.Run == "" {
+			if strings.TrimSpace(s.Run) == "" {
 				return fmt.Errorf("build.steps[%d]: run is required", i)
 			}
 		}

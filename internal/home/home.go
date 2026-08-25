@@ -42,10 +42,26 @@ func (h Home) Packages() string { return filepath.Join(h.root, "packages") }
 // ending in "-*"+TmpSuffix.
 const TmpSuffix = ".tmp"
 
-// BuildStagingInfix names a build's staging directory under Tmp():
-// internal/build creates it via
-// os.MkdirTemp(h.Tmp(), pkg.Name+BuildStagingInfix+"*").
+// BuildStagingInfix marks nem's own scratch paths under Tmp(), so
+// internal/clean can reclaim one a killed run left behind. internal/build
+// names a build's staging directory with it and internal/pkgtest a test
+// run's scratch directory, both via
+// os.MkdirTemp(h.Tmp(), pkg.Name+BuildStagingInfix+"*"). internal/build also
+// names the temp archive file it hands to a build's test hook with it, via
+// os.CreateTemp(h.Tmp(), name+BuildStagingInfix+"archive-*"+TmpSuffix).
 const BuildStagingInfix = "-build-"
+
+// TestInstallInfix names the throwaway installation a package test run makes
+// under packages/: os.MkdirTemp(h.Packages(), pkg.Name+TestInstallInfix+"*").
+// A directory carrying it is never a long-lived install, so clean removes it
+// outright rather than treating its contents as installed versions.
+//
+// Uppercase is deliberate: spec.NameRE restricts package names to
+// lowercase, so no real package directory can ever contain this infix and
+// be mistaken for an alias. Lowering it would let a legitimately named
+// package (e.g. "tool-nemtest-cli") collide with the glob and be swept
+// whole.
+const TestInstallInfix = "-NEMTEST-"
 
 // segmentRE matches a single path segment safe to join under root: no
 // separator, and no leading dot (so ".." and hidden-file tricks are rejected

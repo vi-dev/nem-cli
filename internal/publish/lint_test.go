@@ -248,3 +248,100 @@ func TestLintStringFormat(t *testing.T) {
 		t.Fatalf("String with empty Pkg: got %q", f.String())
 	}
 }
+
+func TestLintTestStepsOnNoPlatform(t *testing.T) {
+	manifest := "schema: 2\nname: tool\nplatforms: [darwin/arm64]\n" +
+		"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+		"versions: [{version: \"1.0.0\"}]\n" +
+		"test:\n  - run: tool --version\n    platforms: [linux/amd64]\n"
+	dir := writeCatalog(t, map[string]string{"tool": manifest})
+	findings, err := Lint(dir)
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if !anyContains(findings, "test[0] applies to none of the package's platforms") {
+		t.Fatalf("want a dead-test-step finding, got %v", findings)
+	}
+}
+
+func TestLintTestStepsOnSomePlatformIsClean(t *testing.T) {
+	manifest := "schema: 2\nname: tool\nplatforms: [darwin/arm64, linux/amd64]\n" +
+		"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+		"versions: [{version: \"1.0.0\"}]\n" +
+		"test:\n  - run: tool --version\n    platforms: [linux/amd64]\n"
+	dir := writeCatalog(t, map[string]string{"tool": manifest})
+	findings, err := Lint(dir)
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("want no findings, got %v", findings)
+	}
+}
+
+func TestLintTestStepsCleanCases(t *testing.T) {
+	cases := []struct {
+		name     string
+		manifest string
+	}{
+		{
+			"test-step-no-platform-constraint",
+			"schema: 2\nname: tool\nplatforms: [darwin/arm64]\n" +
+				"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+				"versions: [{version: \"1.0.0\"}]\n" +
+				"test:\n  - run: tool --version\n",
+		},
+		{
+			"package-no-platform-constraint",
+			"schema: 2\nname: tool\n" +
+				"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+				"versions: [{version: \"1.0.0\"}]\n" +
+				"test:\n  - run: tool --version\n    platforms: [linux/amd64]\n",
+		},
+		{
+			"multiple-steps-all-apply",
+			"schema: 2\nname: tool\nplatforms: [darwin/arm64, linux/amd64]\n" +
+				"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+				"versions: [{version: \"1.0.0\"}]\n" +
+				"test:\n" +
+				"  - run: tool --version\n    platforms: [linux/amd64]\n" +
+				"  - run: tool info\n    platforms: [darwin/arm64]\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeCatalog(t, map[string]string{"tool": tc.manifest})
+			findings, err := Lint(dir)
+			if err != nil {
+				t.Fatalf("Lint: %v", err)
+			}
+			if len(findings) != 0 {
+				t.Fatalf("want no findings, got %v", findings)
+			}
+		})
+	}
+}
+
+// TestLintTestStepsFlagsOneDeadStepAmongLiveOnes proves a single step whose
+// own platform constraint matches nothing is reported even when another
+// step in the same test: block does apply — the aggregate check this
+// replaced stayed silent as long as any one step matched.
+func TestLintTestStepsFlagsOneDeadStepAmongLiveOnes(t *testing.T) {
+	manifest := "schema: 2\nname: tool\nplatforms: [linux/amd64, linux/arm64]\n" +
+		"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n" +
+		"versions: [{version: \"1.0.0\"}]\n" +
+		"test:\n" +
+		"  - run: tool --version\n" +
+		"  - run: tool --help\n    platforms: [darwin/arm64]\n"
+	dir := writeCatalog(t, map[string]string{"tool": manifest})
+	findings, err := Lint(dir)
+	if err != nil {
+		t.Fatalf("Lint: %v", err)
+	}
+	if !anyContains(findings, "test[1] applies to none of the package's platforms") {
+		t.Fatalf("want a dead-test-step finding for test[1], got %v", findings)
+	}
+	if anyContains(findings, "test[0]") {
+		t.Fatalf("test[0] has no platform constraint of its own and must not be flagged, got %v", findings)
+	}
+}

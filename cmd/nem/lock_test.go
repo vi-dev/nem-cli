@@ -13,7 +13,7 @@ import (
 
 func TestLockRegeneratesLockAndInstalls(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -125,7 +125,7 @@ func TestLockGlobalMissingManifestFails(t *testing.T) {
 
 func TestLockGlobalTargetsGlobalManifest(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 

@@ -31,7 +31,7 @@ versions:
 
 func TestSyncInstallsMissingEntry(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -90,7 +90,7 @@ func TestSyncNoManifestFails(t *testing.T) {
 
 func TestSyncWarnsOnManifestDrift(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -128,7 +128,7 @@ func TestSyncWarnsOnManifestDrift(t *testing.T) {
 
 func TestSyncWarnsOnCatalogSwitch(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 
@@ -238,7 +238,7 @@ func TestSyncWarnsOnUnreadableManifest(t *testing.T) {
 
 func TestSyncGlobalInstallsFromGlobalLock(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	chdir(t, t.TempDir()) // no project manifest anywhere
 
 	if _, errb, err := runNem(t, nemHomeDir, "catalog", "add", "demo", catalogRoot); err != nil {
@@ -287,7 +287,7 @@ func TestSyncGlobalWithoutGlobalLockSucceedsSilently(t *testing.T) {
 
 func TestSyncFailedInstallReportsErrorOnce(t *testing.T) {
 	nemHomeDir := t.TempDir()
-	catalogRoot := downloadableDirCatalog(t)
+	catalogRoot := downloadableDirCatalog(t, "")
 	projDir := t.TempDir()
 	chdir(t, projDir)
 

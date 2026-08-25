@@ -311,13 +311,12 @@ func Resolve(ctx context.Context, tools []Tool, sources []catalog.Named) (*Resul
 	return finalize(col.cands, directNames)
 }
 
-// ResolveBuild computes the closure of pkg's build.deps across
-// spec.Supported, walking each build.dep as a dependency edge of pkg. The
-// package being built is not itself part of the result.
-func ResolveBuild(ctx context.Context, pkg *spec.Package, sources []catalog.Named) (*Result, error) {
-	// Stand-in root carrying build.deps as ordinary dep edges; never
-	// itself recorded, so absent from the result.
-	rootPkg := &spec.Package{Name: pkg.Name, Platforms: pkg.Platforms, Deps: pkg.Build.Deps}
+// ResolveDeps computes the closure of deps across spec.Supported, walking
+// each as a dependency edge of pkg. pkg is not itself part of the result.
+func ResolveDeps(ctx context.Context, pkg *spec.Package, deps []spec.Dep, sources []catalog.Named) (*Result, error) {
+	// Stand-in root carrying deps as ordinary dep edges; never itself
+	// recorded, so absent from the result.
+	rootPkg := &spec.Package{Name: pkg.Name, Platforms: pkg.Platforms, Deps: deps}
 	col := newCollector(sources)
 	for _, platform := range spec.Supported {
 		if !supports(rootPkg, platform) {

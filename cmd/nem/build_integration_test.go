@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,7 +10,29 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/vi-dev/nem-cli/internal/home"
 )
+
+// assertNoLeakedTestAlias fails t if any directory under nemHome/packages
+// carries home.TestInstallInfix, which would mean a package test run left
+// its throwaway alias installed rather than removing it.
+func assertNoLeakedTestAlias(t *testing.T, nemHome string) {
+	t.Helper()
+	root := filepath.Join(nemHome, "packages")
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && strings.Contains(d.Name(), home.TestInstallInfix) {
+			t.Errorf("leaked test alias directory: %s", path)
+		}
+		return nil
+	})
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+}
 
 // seedFooLinkDep installs a package "foo" straight into nemHome's package
 // store, with a lib (for kind: link) and a bin/foocli script (for kind: run,
@@ -244,5 +267,91 @@ func TestCatalogBuildPutsDirectRunDepBinsOnPath(t *testing.T) {
 	}
 	if !strings.Contains(string(got), "ON_PATH") {
 		t.Fatalf("a kind: run build dep's bins must be on PATH; probe=%q", got)
+	}
+}
+
+// testedRecipe writes a dependency-free "tool" pkg.yaml whose build step is
+// buildStep and whose single test step is testStep.
+func testedRecipe(t *testing.T, dir, sourceURL, buildStep, testStep string) string {
+	t.Helper()
+	path := filepath.Join(dir, "pkg.yaml")
+	writeFile(t, path, "schema: 2\nname: tool\n"+
+		"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n"+
+		"versions: [v1.0.0]\nbuild:\n  source: {url: \""+sourceURL+"\"}\n"+
+		"  output: out\n"+
+		"  steps:\n    - run: "+buildStep+"\n"+
+		"test:\n  - run: "+testStep+"\n")
+	return path
+}
+
+// helloTarball serves a tarball with a single throwaway source file; tests
+// here build a shell script rather than compile, so no cc is required.
+func helloTarball(t *testing.T) *httptest.Server {
+	t.Helper()
+	tgz := makeTarGz(t, map[string]string{"src/placeholder": "x\n"})
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(tgz) }))
+}
+
+const makeHelloBin = `mkdir -p "$NEM_OUTPUT/bin" && printf '#!/bin/sh\necho hi\n' > "$NEM_OUTPUT/bin/hello" && chmod +x "$NEM_OUTPUT/bin/hello"`
+
+func TestCatalogBuildRunsDeclaredTests(t *testing.T) {
+	nemHome := t.TempDir()
+	srv := helloTarball(t)
+	defer srv.Close()
+
+	recipe := testedRecipe(t, t.TempDir(), srv.URL, makeHelloBin, `hello | grep -q hi`)
+	outDir := filepath.Join(t.TempDir(), "out")
+	if _, errb, err := runNem(t, nemHome, "catalog", "build", recipe,
+		"--version", "v1.0.0", "--output", outDir); err != nil {
+		t.Fatalf("catalog build: %v\n%s", err, errb)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "bin", "hello")); err != nil {
+		t.Fatalf("hello missing from build output: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(nemHome, "packages", "tool", "v1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("the staged tree must not stay installed, stat err = %v", err)
+	}
+	assertNoLeakedTestAlias(t, nemHome)
+}
+
+func TestCatalogBuildFailsOnFailingTest(t *testing.T) {
+	nemHome := t.TempDir()
+	srv := helloTarball(t)
+	defer srv.Close()
+
+	recipe := testedRecipe(t, t.TempDir(), srv.URL, makeHelloBin, `exit 1`)
+	outDir := filepath.Join(t.TempDir(), "out")
+	_, errb, err := runNem(t, nemHome, "catalog", "build", recipe,
+		"--version", "v1.0.0", "--output", outDir)
+	if err == nil {
+		t.Fatal("want catalog build to fail when a test step fails")
+	}
+	// console.Error capitalizes the lead rune of a rendered error, so the
+	// step-numbering text surfaces here as "Test step 1", not "test step 1".
+	if !strings.Contains(errb, "Test step 1") {
+		t.Fatalf("error must name the failing step, got:\n%s", errb)
+	}
+	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
+		t.Fatalf("a failed build must not reach --output, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(nemHome, "packages", "tool", "v1.0.0")); !os.IsNotExist(err) {
+		t.Fatalf("a failed build must leave nothing staged, stat err = %v", err)
+	}
+	assertNoLeakedTestAlias(t, nemHome)
+}
+
+func TestCatalogBuildNoTestSkipsTests(t *testing.T) {
+	nemHome := t.TempDir()
+	srv := helloTarball(t)
+	defer srv.Close()
+
+	recipe := testedRecipe(t, t.TempDir(), srv.URL, makeHelloBin, `exit 1`)
+	outDir := filepath.Join(t.TempDir(), "out")
+	if _, errb, err := runNem(t, nemHome, "catalog", "build", recipe,
+		"--version", "v1.0.0", "--output", outDir, "--no-test"); err != nil {
+		t.Fatalf("--no-test must skip the failing step: %v\n%s", err, errb)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "bin", "hello")); err != nil {
+		t.Fatalf("hello missing from build output: %v", err)
 	}
 }

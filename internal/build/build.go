@@ -31,6 +31,9 @@ type Options struct {
 	Version, Output, SourceSha256 string
 	Push                          string // registry ref; "" = no push
 	DryRun, Force                 bool
+	// Test runs pkg's declared tests against an installation made from
+	// artifactPath — the archive this build would publish. nil runs no tests.
+	Test func(ctx context.Context, pkg *spec.Package, version, artifactPath string) error
 }
 
 // Result is what a successful Build produced.
@@ -89,7 +92,7 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, err
 	}
 
-	deps, err := resolveBuildDeps(ctx, h, cfg, sources, rep, pkg)
+	deps, err := ResolveDeps(ctx, h, cfg, sources, rep, pkg, pkg.Build.Deps)
 	if err != nil {
 		return Result{}, err
 	}
@@ -99,9 +102,13 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		return Result{}, fmt.Errorf("package dir for %s@%s: %w", pkg.Name, version, err)
 	}
 	outputDir := filepath.Join(srcRoot, pkg.Build.Output)
-	env := composeBuildEnv(os.Environ(), deps, buildContext{
+	env := ComposeEnv(os.Environ(), deps, EnvContext{
 		Version: version, Platform: spec.Current(), Prefix: prefix, StagingDir: staging, OutputDir: outputDir,
 	})
+	// PWD is forced to srcRoot: a POSIX shell otherwise replaces PWD via
+	// getcwd(), which resolves symlinks and makes $PWD disagree with
+	// $NEM_OUTPUT and $NEM_STAGING_DIR.
+	env = ScrubEnv(env, []string{"PWD"}, "PWD="+srcRoot)
 
 	ran := 0
 	for i, step := range pkg.Build.Steps {
@@ -130,33 +137,58 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 		}
 	}
 
-	final, err := harvest(outputDir, opts.Output)
-	if err != nil {
-		return Result{}, err
-	}
-
+	// Verify and test before harvest, so a failing package never reaches
+	// --output.
 	packagesRoot := h.Packages()
-	vs, err := VerifyConformance(final, []string{staging, packagesRoot})
+	vs, err := VerifyConformance(outputDir, []string{staging, packagesRoot})
 	if err != nil {
-		return Result{}, fmt.Errorf("verify %s: %w", final, err)
+		return Result{}, fmt.Errorf("verify %s: %w", outputDir, err)
 	}
 	if len(vs) > 0 {
 		return Result{}, conformanceError(vs)
 	}
 
+	// One archive serves both test and push, so the tested bytes are the
+	// published bytes.
+	var archive []byte
+	if opts.Test != nil || opts.Push != "" {
+		var buf bytes.Buffer
+		if err := tarGzDir(&buf, outputDir); err != nil {
+			return Result{}, fmt.Errorf("archive %s: %w", outputDir, err)
+		}
+		archive = buf.Bytes()
+	}
+
+	if opts.Test != nil {
+		tmpArchive, err := writeTempArchive(h, pkg.Name, archive)
+		if err != nil {
+			return Result{}, err
+		}
+		// Deferred so a panicking hook does not leak the archive.
+		defer os.Remove(tmpArchive)
+		if err := opts.Test(ctx, pkg, version, tmpArchive); err != nil {
+			return Result{}, err
+		}
+	}
+
+	final, err := harvest(outputDir, opts.Output)
+	if err != nil {
+		return Result{}, err
+	}
+
 	result := Result{OutputDir: final, Version: version, SourceSha256: sha, SourceVerified: verified}
 	if opts.Push != "" {
-		ref, pushed, err := pushBuiltArchive(ctx, final, pkg.Name, version, opts, rep)
+		ref, pushed, err := pushBuiltArchive(ctx, archive, pkg.Name, version, opts, rep)
 		if err != nil {
 			return Result{}, err
 		}
 		result.Pushed = pushed
 		result.PushedRef = ref
 	}
-	// The built package's own row outlives every clean run: clean prunes
-	// only the rows whose version directory it deleted, and a build output
-	// never lands in packages/. It is dropped once that version is
-	// installed and later evicted.
+	// This row has no directory under packages/ yet — the build output lands
+	// under tmp/ — so clean can't reclaim it until the package is installed
+	// for real under this name. A test install's row is separate and
+	// removes itself.
 	keys := []string{usage.Key(pkg.Name, version)}
 	for _, d := range deps {
 		keys = append(keys, usage.Key(d.Name, d.Version))
@@ -165,21 +197,17 @@ func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []cata
 	return result, nil
 }
 
-// pushBuiltArchive tars final and publishes it as version's host-platform
-// entry of the archive index at opts.Push. On --dry-run it reports the plan
-// and pushes nothing.
-func pushBuiltArchive(ctx context.Context, final, name, version string, opts Options, rep report.Reporter) (string, bool, error) {
+// pushBuiltArchive publishes archive as version's host-platform entry of the
+// archive index at opts.Push. On --dry-run it reports the plan and pushes
+// nothing.
+func pushBuiltArchive(ctx context.Context, archive []byte, name, version string, opts Options, rep report.Reporter) (string, bool, error) {
 	archivesRef, err := ocix.ArchivesRef(opts.Push, name)
 	if err != nil {
 		return "", false, err
 	}
-	var buf bytes.Buffer
-	if err := tarGzDir(&buf, final); err != nil {
-		return "", false, fmt.Errorf("archive %s: %w", final, err)
-	}
 	plat := spec.Current()
 	if opts.DryRun {
-		d := content.NewDescriptorFromBytes(ocix.MediaTypeArchive, buf.Bytes())
+		d := content.NewDescriptorFromBytes(ocix.MediaTypeArchive, archive)
 		rep.Info("Dry-run: would push %s:%s (%s) %s", archivesRef, version, plat, d.Digest)
 		return archivesRef, false, nil
 	}
@@ -187,7 +215,7 @@ func pushBuiltArchive(ctx context.Context, final, name, version string, opts Opt
 	if err != nil {
 		return "", false, err
 	}
-	if _, pushed, err := ocix.PushArchive(ctx, target, version, plat, buf.Bytes(), opts.Force); err != nil {
+	if _, pushed, err := ocix.PushArchive(ctx, target, version, plat, archive, opts.Force); err != nil {
 		return "", false, err
 	} else if !pushed {
 		rep.Info("Archive %s:%s (%s) unchanged", archivesRef, version, plat)
@@ -216,23 +244,34 @@ func fetchBuildSource(ctx context.Context, pkg *spec.Package, version, shaOverri
 	return fetchSource(ctx, http.DefaultClient, url, want, staging, fetch.Meta{Name: pkg.Name, Version: version, Platform: spec.Current()})
 }
 
-// resolveBuildDeps resolves pkg's build.deps as dependency edges of pkg (the
-// same edge walk and role assignment a package's runtime deps get), installs
-// them, then reads back each current-platform lock entry's install metadata
-// to build the deps composeBuildEnv needs.
-func resolveBuildDeps(ctx context.Context, h home.Home, cfg *catalog.Config, sources []catalog.Named, rep report.Reporter, pkg *spec.Package) ([]resolvedDep, error) {
-	if len(pkg.Build.Deps) == 0 {
+// ResolveDeps resolves deps as dependency edges of pkg (the same edge walk
+// and role assignment a package's runtime deps get), installs them, then
+// reads back each current-platform lock entry's install metadata to build
+// the deps ComposeEnv needs.
+func ResolveDeps(ctx context.Context, h home.Home, cfg *catalog.Config, sources []catalog.Named,
+	rep report.Reporter, pkg *spec.Package, deps []spec.Dep) ([]ResolvedDep, error) {
+	if len(deps) == 0 {
 		return nil, nil
 	}
-	result, err := resolve.ResolveBuild(ctx, pkg, sources)
+	result, err := resolve.ResolveDeps(ctx, pkg, deps, sources)
 	if err != nil {
 		return nil, err
 	}
+	return InstallResolvedDeps(ctx, h, cfg, rep, result)
+}
+
+// InstallResolvedDeps installs result's current-platform entries, then reads
+// back each entry's install metadata to build the deps ComposeEnv needs.
+// Callers that resolve a closure themselves — rather than through
+// ResolveDeps — use this directly, so the source of the resolution is
+// theirs to choose.
+func InstallResolvedDeps(ctx context.Context, h home.Home, cfg *catalog.Config,
+	rep report.Reporter, result *resolve.Result) ([]ResolvedDep, error) {
 	if err := install.Run(ctx, h, rep, currentPlatformJobs(cfg, result)); err != nil {
 		return nil, err
 	}
 	current := spec.Current().String()
-	var deps []resolvedDep
+	var out []ResolvedDep
 	for _, e := range result.Entries {
 		if !slices.Contains(e.Platforms, current) {
 			continue
@@ -245,13 +284,13 @@ func resolveBuildDeps(ctx context.Context, h home.Home, cfg *catalog.Config, sou
 		if err != nil {
 			return nil, err
 		}
-		deps = append(deps, resolvedDep{
+		out = append(out, ResolvedDep{
 			Name: e.Name, Version: e.Version, Prefix: prefix,
 			OnPath: e.OnPath, OnLoaderPath: e.OnLoaderPath,
 			Bins: meta.Bins, Libs: meta.Libs,
 		})
 	}
-	return deps, nil
+	return out, nil
 }
 
 // currentPlatformJobs builds install jobs for the entries the running
@@ -293,6 +332,24 @@ func harvest(outputDir, output string) (string, error) {
 		return "", fmt.Errorf("move build output to %s: %w", output, err)
 	}
 	return output, nil
+}
+
+// writeTempArchive spills an in-memory archive to a file, because install
+// consumes an artifact by path.
+func writeTempArchive(h home.Home, name string, data []byte) (string, error) {
+	if err := os.MkdirAll(h.Tmp(), 0o755); err != nil {
+		return "", fmt.Errorf("create tmp dir: %w", err)
+	}
+	f, err := os.CreateTemp(h.Tmp(), name+home.BuildStagingInfix+"archive-*"+home.TmpSuffix)
+	if err != nil {
+		return "", fmt.Errorf("create archive temp file: %w", err)
+	}
+	defer f.Close()
+	if _, err := f.Write(data); err != nil {
+		os.Remove(f.Name())
+		return "", fmt.Errorf("write archive temp file: %w", err)
+	}
+	return f.Name(), nil
 }
 
 func conformanceError(vs []Violation) error {

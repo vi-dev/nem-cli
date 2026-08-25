@@ -262,3 +262,42 @@ func TestValidateActionTemplates(t *testing.T) {
 		t.Fatalf("templated copy rejected: %v", err)
 	}
 }
+
+func TestValidateRejectsEmptyTestRun(t *testing.T) {
+	for _, run := range []string{"", "   ", "\n\t "} {
+		p, err := Parse([]byte(testStepsYAML))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		p.Test[1].Run = run
+		err = p.Validate()
+		if err == nil || !strings.Contains(err.Error(), "test[1]: run is required") {
+			t.Fatalf("run %q: want a test[1] run error, got %v", run, err)
+		}
+	}
+}
+
+// TestValidateRejectsEmptyBuildStepRun holds the build-step check to the
+// same rule as its test-step sibling: a step of nothing but whitespace is
+// as empty as no step at all.
+func TestValidateRejectsEmptyBuildStepRun(t *testing.T) {
+	for _, run := range []string{"", "   ", "\n\t "} {
+		p := valid()
+		p.Build = &Build{Output: "out", Steps: []BuildStep{{Run: "make"}, {Run: run}}}
+		p.Build.Source.URL = "https://x/{{.Version}}.tar.gz"
+		err := p.Validate()
+		if err == nil || !strings.Contains(err.Error(), "build.steps[1]: run is required") {
+			t.Fatalf("run %q: want a build.steps[1] run error, got %v", run, err)
+		}
+	}
+}
+
+func TestValidateAcceptsTestSteps(t *testing.T) {
+	p, err := Parse([]byte(testStepsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}

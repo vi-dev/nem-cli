@@ -10,9 +10,14 @@ import (
 	"github.com/vi-dev/nem-cli/internal/home"
 )
 
-// buildStagingGlob matches the name internal/build gives a staging
-// directory under tmp/: "<pkg>"+home.BuildStagingInfix+"<random>".
+// buildStagingGlob matches the scratch-directory names internal/build and
+// internal/pkgtest give their work under tmp/:
+// "<pkg>"+home.BuildStagingInfix+"<random>".
 const buildStagingGlob = "*" + home.BuildStagingInfix + "*"
+
+// testInstallGlob matches the throwaway installations a package test run
+// makes under packages/: "<pkg>"+home.TestInstallInfix+"<random>".
+const testInstallGlob = "*" + home.TestInstallInfix + "*"
 
 // Scan gathers everything reclaimable under $NEM_HOME. A directory that is
 // absent is not an error: a fresh install has no tmp/ and no packages/.
@@ -32,8 +37,8 @@ func Scan(h home.Home, includeVersions bool) (Store, error) {
 		path := filepath.Join(h.Tmp(), e.Name())
 		switch {
 		case e.IsDir():
-			// Only the shape internal/build creates. Anything else in tmp/
-			// belongs to code this sweep knows nothing about.
+			// Only the shape nem's own scratch dirs take. Anything else in
+			// tmp/ belongs to code this sweep knows nothing about.
 			if ok, _ := filepath.Match(buildStagingGlob, e.Name()); !ok {
 				continue
 			}
@@ -60,6 +65,17 @@ func Scan(h home.Home, includeVersions bool) (Store, error) {
 	}
 	for _, n := range names {
 		if !n.IsDir() {
+			continue
+		}
+		// A whole aliased tree is scratch, not an installed version: report
+		// it for removal and do not descend into its versions.
+		if ok, _ := filepath.Match(testInstallGlob, n.Name()); ok {
+			path := filepath.Join(pkgRoot, n.Name())
+			newest, size, err := treeStat(path)
+			if err != nil {
+				continue // vanished mid-scan, or unreadable; leave it alone
+			}
+			s.TestInstalls = append(s.TestInstalls, Item{Path: path, Newest: newest, Size: size})
 			continue
 		}
 		versions, err := os.ReadDir(filepath.Join(pkgRoot, n.Name()))

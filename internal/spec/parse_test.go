@@ -363,3 +363,76 @@ versions: [v1.0.0]
 		t.Fatalf("normalize: false must parse to *false, got %v", p.Build.Normalize)
 	}
 }
+
+const testStepsYAML = `
+schema: 2
+name: rg
+artifact: {url: "https://example.com/rg-{{.Version}}.tar.gz"}
+install: [{extract: {strip: 1}}]
+versions:
+  - version: 1.0.0
+    sha256:
+      darwin/arm64: "a"
+      darwin/amd64: "b"
+      linux/arm64: "c"
+      linux/amd64: "d"
+test:
+  - run: rg --version
+  - run: |
+      set -e
+      printf 'hello\n' > f.txt
+      rg -q hello f.txt
+    platforms: [linux/amd64, linux/arm64]
+`
+
+func TestParseTestSteps(t *testing.T) {
+	p, err := Parse([]byte(testStepsYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if len(p.Test) != 2 {
+		t.Fatalf("want 2 test steps, got %d", len(p.Test))
+	}
+	if p.Test[0].Run != "rg --version\n" && p.Test[0].Run != "rg --version" {
+		t.Fatalf("step 0 run = %q", p.Test[0].Run)
+	}
+	if len(p.Test[0].Platforms) != 0 {
+		t.Fatalf("step 0 should be unconstrained, got %v", p.Test[0].Platforms)
+	}
+	if !strings.Contains(p.Test[1].Run, "printf") {
+		t.Fatalf("step 1 run = %q", p.Test[1].Run)
+	}
+	if len(p.Test[1].Platforms) != 2 {
+		t.Fatalf("want 2 platforms on step 1, got %v", p.Test[1].Platforms)
+	}
+	if p.Test[1].Platforms[0] != (Platform{OS: "linux", Arch: "amd64"}) {
+		t.Fatalf("step 1 platform 0 = %v", p.Test[1].Platforms[0])
+	}
+}
+
+func TestParseNoTestSection(t *testing.T) {
+	p, err := Parse([]byte(fullYAML))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if p.Test != nil {
+		t.Fatalf("want nil Test with no test: key, got %v", p.Test)
+	}
+}
+
+func TestParseTestStepRejectsUnknownField(t *testing.T) {
+	src := strings.Replace(testStepsYAML, "  - run: rg --version\n",
+		"  - run: rg --version\n    bogus: 1\n", 1)
+	if _, err := Parse([]byte(src)); err == nil {
+		t.Fatal("want error for unknown field inside a test step")
+	}
+}
+
+func TestParseTestStepRejectsBadPlatform(t *testing.T) {
+	src := strings.Replace(testStepsYAML, "platforms: [linux/amd64, linux/arm64]",
+		"platforms: [plan9/amd64]", 1)
+	_, err := Parse([]byte(src))
+	if err == nil || !strings.Contains(err.Error(), "test[1]") {
+		t.Fatalf("want a test[1] platform error, got %v", err)
+	}
+}
