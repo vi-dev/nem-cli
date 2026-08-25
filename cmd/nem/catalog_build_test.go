@@ -88,3 +88,29 @@ func TestCatalogBuildPushFlag(t *testing.T) {
 		t.Fatalf("expected dry-run narration, got: %s", errb)
 	}
 }
+
+// TestCatalogBuildSkipsAPackageUnsupportedHere proves the skip happens
+// before the recipe runs: the step would fail if it ever executed, and no
+// catalog is configured, so resolving would fail too.
+func TestCatalogBuildSkipsAPackageUnsupportedHere(t *testing.T) {
+	nemHome := t.TempDir()
+	dir := t.TempDir()
+	other := "linux/amd64"
+	if spec.Current().String() == other {
+		other = "darwin/arm64"
+	}
+	recipe := filepath.Join(dir, "pkg.yaml")
+	writeFile(t, recipe, "schema: 2\nname: tool\nplatforms: ["+other+"]\n"+
+		"artifact: {oci: \":{{.Version}}\"}\ninstall: [{extract: {}}]\n"+
+		"versions: [{version: \"1.0.0\", sourceSha256: \"abc\"}]\n"+
+		"build:\n  source: {url: \"https://example.invalid/t.tar.gz\"}\n"+
+		"  output: out\n  steps:\n    - run: \"exit 1\"\n")
+
+	out, errb, err := runNem(t, nemHome, "catalog", "build", recipe)
+	if err != nil {
+		t.Fatalf("catalog build: %v\n%s", err, errb)
+	}
+	if !strings.Contains(out+errb, "does not support") {
+		t.Fatalf("want an unsupported-platform notice, got:\n%s\n%s", out, errb)
+	}
+}

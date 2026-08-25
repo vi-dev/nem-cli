@@ -31,6 +31,12 @@ func newCatalogBuildCmd() *cobra.Command {
 			if err := pkg.Validate(); err != nil {
 				return err
 			}
+			// Checked before any recipe runs: a package that excludes this
+			// platform has no recipe to run here.
+			if plat := spec.Current(); !spec.PlatformsInclude(pkg.Platforms, plat) {
+				console.Info("%s does not support %s", pkg.Name, plat)
+				return nil
+			}
 			cfg, err := catalog.OpenConfig(nemHome)
 			if err != nil {
 				return err
