@@ -48,7 +48,7 @@ func (o *OCI) open(ctx context.Context) (*ocix.Store, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if o.store == nil {
-		s, err := ocix.OpenStore(ctx, o.storePath)
+		s, err := ocix.OpenLocalStore(ctx, o.storePath)
 		if err != nil {
 			return nil, err
 		}

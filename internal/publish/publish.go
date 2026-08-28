@@ -43,9 +43,9 @@ var openTarget = func(ctx context.Context, ref string) (oras.Target, error) {
 	return t, err
 }
 
-// SetTargetOpenerForTest swaps the target opener Publish uses and returns
+// SetTargetOpener swaps the target opener Publish uses and returns
 // a closure that restores the previous one. Test-only.
-func SetTargetOpenerForTest(f func(context.Context, string) (oras.Target, error)) (restore func()) {
+func SetTargetOpener(f func(context.Context, string) (oras.Target, error)) (restore func()) {
 	prev := openTarget
 	openTarget = f
 	return func() { openTarget = prev }
@@ -70,7 +70,7 @@ type pkgEntry struct {
 // and returns before the target is opened. A package whose manifest
 // content already exists in the target is skipped unless Force is set.
 func Publish(ctx context.Context, dir, ref string, opts Options, r report.Reporter) error {
-	if err := ocix.ValidateBaseRef(ref); err != nil {
+	if err := ocix.WithoutTagOrDigest(ref); err != nil {
 		return err
 	}
 
@@ -107,8 +107,8 @@ func Publish(ctx context.Context, dir, ref string, opts Options, r report.Report
 		return err
 	}
 
-	idxBytes, idxDesc := ocix.AssembleIndex(idxEntries)
-	if err := ocix.PushIndex(ctx, target, idxBytes, idxDesc, tags); err != nil {
+	idxBytes, idxDesc := ocix.AssembleCatalogIndex(idxEntries)
+	if err := ocix.PushBlobAndTag(ctx, target, idxBytes, idxDesc, tags); err != nil {
 		return fmt.Errorf("push catalog index: %w", err)
 	}
 
@@ -201,25 +201,22 @@ func readEntry(path string) (pkgEntry, error) {
 }
 
 // pushPackages pushes every entry into target concurrently, bounded to
-// min(runtime.NumCPU(), 8) at once, and returns one ocix.IndexEntry per
+// min(runtime.NumCPU(), 8) at once, and returns one ocix.CatalogIndexEntry per
 // package plus the pushed/skipped counts. A package whose manifest
 // content already exists in target is skipped unless force is set. The
 // first push failure cancels every other in-flight push; its error is
 // returned once every goroutine has unwound.
-func pushPackages(ctx context.Context, target oras.Target, entries []pkgEntry, force bool, r report.Reporter) ([]ocix.IndexEntry, int, int, error) {
-	idxEntries := make([]ocix.IndexEntry, len(entries))
+func pushPackages(ctx context.Context, target oras.Target, entries []pkgEntry, force bool, r report.Reporter) ([]ocix.CatalogIndexEntry, int, int, error) {
+	idxEntries := make([]ocix.CatalogIndexEntry, len(entries))
 	var pushed, skipped atomic.Int64
 
 	g, gctx := errgroup.WithContext(ctx)
-	sem := make(chan struct{}, min(runtime.NumCPU(), 8))
+	g.SetLimit(min(runtime.NumCPU(), 8))
 
 	for i, e := range entries {
 		g.Go(func() error {
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-gctx.Done():
-				return gctx.Err()
+			if err := gctx.Err(); err != nil {
+				return err
 			}
 			entry, wasPushed, err := pushOne(gctx, target, e, force, r)
 			if err != nil {
@@ -244,16 +241,16 @@ func pushPackages(ctx context.Context, target oras.Target, entries []pkgEntry, f
 // push when its content already exists and force is false. It always
 // returns the index entry the package contributes to the catalog index,
 // whichever path it took.
-func pushOne(ctx context.Context, target oras.Target, e pkgEntry, force bool, r report.Reporter) (ocix.IndexEntry, bool, error) {
-	desc, err := ocix.PackageManifestDescriptor(e.Bytes)
+func pushOne(ctx context.Context, target oras.Target, e pkgEntry, force bool, r report.Reporter) (ocix.CatalogIndexEntry, bool, error) {
+	_, desc, err := ocix.PackageManifest(e.Bytes)
 	if err != nil {
-		return ocix.IndexEntry{}, false, fmt.Errorf("compute manifest descriptor for %s: %w", e.Name, err)
+		return ocix.CatalogIndexEntry{}, false, fmt.Errorf("compute manifest descriptor for %s: %w", e.Name, err)
 	}
 
 	if !force {
-		exists, err := ocix.ManifestExists(ctx, target, desc)
+		exists, err := target.Exists(ctx, desc)
 		if err != nil {
-			return ocix.IndexEntry{}, false, fmt.Errorf("check %s: %w", e.Name, err)
+			return ocix.CatalogIndexEntry{}, false, fmt.Errorf("check %s: %w", e.Name, err)
 		}
 		if exists {
 			r.Info("Skip %s %s (unchanged)", e.Name, e.Version)
@@ -263,15 +260,15 @@ func pushOne(ctx context.Context, target oras.Target, e pkgEntry, force bool, r 
 
 	pushed, err := ocix.PushPackageManifest(ctx, target, e.Bytes)
 	if err != nil {
-		return ocix.IndexEntry{}, false, fmt.Errorf("push %s: %w", e.Name, err)
+		return ocix.CatalogIndexEntry{}, false, fmt.Errorf("push %s: %w", e.Name, err)
 	}
 	r.Info("Push %s %s", e.Name, e.Version)
 	return indexEntry(e, pushed), true, nil
 }
 
-// indexEntry builds the ocix.IndexEntry a package contributes to the
+// indexEntry builds the ocix.CatalogIndexEntry a package contributes to the
 // catalog index from its metadata and its (pushed or pre-existing)
 // manifest descriptor.
-func indexEntry(e pkgEntry, desc ocispec.Descriptor) ocix.IndexEntry {
-	return ocix.IndexEntry{Manifest: desc, Title: e.Name, Description: e.Description, Version: e.Version}
+func indexEntry(e pkgEntry, desc ocispec.Descriptor) ocix.CatalogIndexEntry {
+	return ocix.CatalogIndexEntry{Manifest: desc, Title: e.Name, Description: e.Description, Version: e.Version}
 }

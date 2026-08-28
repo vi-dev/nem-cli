@@ -48,7 +48,7 @@ func syncedStore(t *testing.T) string {
 		YAML: []byte(ociGoYAML),
 	}}, "2")
 	storePath := filepath.Join(t.TempDir(), "store")
-	if _, err := ocix.SyncFrom(context.Background(), src, "v2", storePath); err != nil {
+	if _, err := ocix.SyncLocalCatalog(context.Background(), src, "v2", storePath, nil); err != nil {
 		t.Fatal(err)
 	}
 	return storePath
@@ -96,7 +96,7 @@ func TestOCINameMismatchErrors(t *testing.T) {
 		YAML: []byte(ociMismatchYAML),
 	}}, "2")
 	storePath := filepath.Join(t.TempDir(), "store")
-	if _, err := ocix.SyncFrom(ctx, src, "v2", storePath); err != nil {
+	if _, err := ocix.SyncLocalCatalog(ctx, src, "v2", storePath, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func BenchmarkOCISourceResolvePattern(b *testing.B) {
 	}
 	ocix.PushFakeCatalogForTest(b, src, entries, "2")
 	storePath := filepath.Join(b.TempDir(), "store")
-	if _, err := ocix.SyncFrom(context.Background(), src, "v2", storePath); err != nil {
+	if _, err := ocix.SyncLocalCatalog(context.Background(), src, "v2", storePath, nil); err != nil {
 		b.Fatal(err)
 	}
 	ctx := context.Background()

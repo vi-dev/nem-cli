@@ -3,13 +3,24 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/pem"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
-	"github.com/vi-dev/nem-cli/internal/catalog"
+	"oras.land/oras-go/v2/content/oci"
+
+	"github.com/vi-dev/nem-cli/internal/config"
+	"github.com/vi-dev/nem-cli/internal/ocix"
 )
 
 func runNem(t *testing.T, nemHomeDir string, args ...string) (string, string, error) {
@@ -110,7 +121,7 @@ func TestCatalogUpdateSyncsOCI(t *testing.T) {
 	nemHome := t.TempDir()
 	var synced []string
 	orig := syncCatalog
-	syncCatalog = func(ctx context.Context, ref, storePath string) (string, error) {
+	syncCatalog = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) (string, error) {
 		synced = append(synced, ref+"|"+storePath)
 		return "sha256:fake", nil
 	}
@@ -124,7 +135,7 @@ func TestCatalogUpdateSyncsOCI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update: %v\n%s", err, errb)
 	}
-	if len(synced) != 1 || !strings.Contains(synced[0], catalog.OfficialRef) {
+	if len(synced) != 1 || !strings.Contains(synced[0], config.OfficialRef) {
 		t.Fatalf("synced: %v", synced)
 	}
 	if !strings.Contains(errb, "Synced catalog official") {
@@ -142,10 +153,122 @@ func TestCatalogUpdateSyncsOCI(t *testing.T) {
 	}
 }
 
+// TestCatalogUpdateReportsSyncProgress proves the "Syncing catalog" task
+// wired through report.RunTask receives real x/y progress as SyncFrom
+// copies the closure: total known as the index's own manifest count plus
+// one, done reaching it exactly once the sync completes.
+func TestCatalogUpdateReportsSyncProgress(t *testing.T) {
+	src, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatalf("oci.New: %v", err)
+	}
+	const n = 4
+	entries := make([]ocix.FakeEntry, n)
+	for i := range entries {
+		name := fmt.Sprintf("pkg%d", i)
+		entries[i] = ocix.FakeEntry{Name: name, YAML: []byte("name: " + name)}
+	}
+	ocix.PushFakeCatalogForTest(t, src, entries, ocix.SchemaVersion)
+
+	var mu sync.Mutex
+	var calls []struct{ done, total int64 }
+	orig := syncCatalog
+	syncCatalog = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) (string, error) {
+		store, err := ocix.SyncLocalCatalog(ctx, src, "v2", storePath, func(done, total int64) {
+			mu.Lock()
+			calls = append(calls, struct{ done, total int64 }{done, total})
+			mu.Unlock()
+			progress(done, total)
+		})
+		if err != nil {
+			return "", err
+		}
+		return store.Digest(), nil
+	}
+	defer func() { syncCatalog = orig }()
+
+	nemHome := t.TempDir()
+	if _, _, err := runNem(t, nemHome, "catalog", "add", "prog", "ghcr.io/x/prog:v2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, err := runNem(t, nemHome, "catalog", "update", "prog"); err != nil {
+		t.Fatalf("update: %v\n%s", err, errb)
+	}
+
+	if len(calls) == 0 {
+		t.Fatal("no progress calls recorded during sync")
+	}
+	wantTotal := int64(n + 1)
+	last := calls[len(calls)-1]
+	if last.done != wantTotal || last.total != wantTotal {
+		t.Fatalf("final call = %+v, want done=total=%d", last, wantTotal)
+	}
+	for _, c := range calls {
+		if c.total != 0 && c.total != wantTotal {
+			t.Fatalf("call %+v: total changed mid-run, want a stable %d once known", c, wantTotal)
+		}
+	}
+}
+
+// TestCatalogUpdateHonorsConfiguredHostTrust proves the trust chain
+// end-to-end through a real command invocation: a hosts: entry naming a
+// private CA, written into $NEM_HOME/config.yaml, lets `catalog update`
+// complete a real TLS handshake with a registry whose certificate that CA
+// signs — the root hook's lenient loader feeding netx, and
+// ocix.NewRemoteRepository consulting it, all through production wiring
+// (no test doubles for syncCatalog or the HTTP client). The registry host
+// is loopback, so the same run also proves the explicit CA entry beats
+// the built-in loopback-defaults-to-plain-HTTP convenience: a plain-HTTP
+// attempt against this TLS-only server would fail differently.
+func TestCatalogUpdateHonorsConfiguredHostTrust(t *testing.T) {
+	manifest := []byte(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.index.v1+json","manifests":[],"annotations":{"org.vi-dev.nem.catalog.schemaVersion":"2"}}`)
+	sum := sha256.Sum256(manifest)
+	digest := "sha256:" + hex.EncodeToString(sum[:])
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/v2/cat/manifests/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+		w.Header().Set("Docker-Content-Digest", digest)
+		w.Header().Set("Content-Length", strconv.Itoa(len(manifest)))
+		if r.Method == http.MethodGet {
+			w.Write(manifest)
+		}
+	})
+	srv := httptest.NewTLSServer(mux)
+	t.Cleanup(srv.Close)
+
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caPath, caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	host := srv.Listener.Addr().String()
+
+	nemHomeDir := t.TempDir()
+	cfgYAML := "hosts:\n  - host: " + host + "\n    ca: " + caPath + "\n"
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "config.yaml"), []byte(cfgYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, errb, err := runNem(t, nemHomeDir, "catalog", "add", "trusted", host+"/cat:v2"); err != nil {
+		t.Fatalf("add: %v\n%s", err, errb)
+	}
+	_, errb, err := runNem(t, nemHomeDir, "catalog", "update", "trusted")
+	if err != nil {
+		t.Fatalf("update over configured-CA TLS: %v\nstderr: %s", err, errb)
+	}
+	if !strings.Contains(errb, "Synced catalog trusted") {
+		t.Fatalf("narration: %q", errb)
+	}
+}
+
 func TestCatalogUpdateSkipsDisabled(t *testing.T) {
 	dir := t.TempDir()
 	h := testNemHome(dir)
-	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+	if err := config.SaveConfig(h, &config.Config{Catalogs: []config.CatalogEntry{
 		{Name: "on", Type: "oci", Ref: "ghcr.io/x/on:v2"},
 		{Name: "off", Type: "oci", Ref: "ghcr.io/x/off:v2", Disabled: true},
 	}}); err != nil {
@@ -153,7 +276,7 @@ func TestCatalogUpdateSkipsDisabled(t *testing.T) {
 	}
 	var synced []string
 	orig := syncCatalog
-	syncCatalog = func(ctx context.Context, ref, storePath string) (string, error) {
+	syncCatalog = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) (string, error) {
 		synced = append(synced, ref)
 		return "", nil
 	}
@@ -176,7 +299,7 @@ func TestCatalogDisableEnable(t *testing.T) {
 	if _, _, err := runNem(t, dir, "catalog", "disable", "tools"); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	cfg, _ := catalog.OpenConfig(testNemHome(dir))
+	cfg, _ := config.OpenConfig(testNemHome(dir))
 	if e := cfg.Find("tools"); e == nil || !e.Disabled {
 		t.Fatalf("tools should be disabled, got %+v", e)
 	}
@@ -187,7 +310,7 @@ func TestCatalogDisableEnable(t *testing.T) {
 	if _, _, err := runNem(t, dir, "catalog", "enable", "tools"); err != nil {
 		t.Fatalf("enable: %v", err)
 	}
-	cfg, _ = catalog.OpenConfig(testNemHome(dir))
+	cfg, _ = config.OpenConfig(testNemHome(dir))
 	if e := cfg.Find("tools"); e == nil || e.Disabled {
 		t.Fatalf("tools should be enabled, got %+v", e)
 	}
@@ -203,7 +326,7 @@ func TestCatalogDisableUnknownNameErrors(t *testing.T) {
 func TestCatalogListShowsStatus(t *testing.T) {
 	dir := t.TempDir()
 	h := testNemHome(dir)
-	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+	if err := config.SaveConfig(h, &config.Config{Catalogs: []config.CatalogEntry{
 		{Name: "on", Type: "dir", Path: "/tmp/on"},
 		{Name: "off", Type: "dir", Path: "/tmp/off", Disabled: true},
 	}}); err != nil {
@@ -296,6 +419,8 @@ func TestCatalogCommandGroupMembership(t *testing.T) {
 		"missing":  catalogGroupMaintenance,
 		"diff":     catalogGroupMaintenance,
 		"publish":  catalogGroupMaintenance,
+		"mirror":   catalogGroupMaintenance,
+		"fill":     catalogGroupMaintenance,
 	}
 	for _, c := range newCatalogCmd().Commands() {
 		group, ok := want[c.Name()]

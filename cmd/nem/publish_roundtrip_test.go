@@ -35,7 +35,7 @@ func TestPublishToUseRoundTrip(t *testing.T) {
 
 	catalogRoot := downloadableDirCatalog(t, "")
 
-	restorePublish := publish.SetTargetOpenerForTest(func(context.Context, string) (oras.Target, error) {
+	restorePublish := publish.SetTargetOpener(func(context.Context, string) (oras.Target, error) {
 		return shared, nil
 	})
 	defer restorePublish()
@@ -61,8 +61,8 @@ func TestPublishToUseRoundTrip(t *testing.T) {
 	}
 
 	origSync := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
-		_, err := ocix.SyncFrom(ctx, shared, "v2", storePath)
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
+		_, err := ocix.SyncLocalCatalog(ctx, shared, "v2", storePath, progress)
 		return err
 	}
 	defer func() { syncCatalogStore = origSync }()
@@ -71,7 +71,7 @@ func TestPublishToUseRoundTrip(t *testing.T) {
 	// consumer's registry-archive probe always misses; stubbing pullArchive
 	// to ErrArchiveNotFound reproduces that miss without a real registry and
 	// exercises Acquire's upstream-url fallback.
-	restoreFetch := fetch.SetPullArchiveForTest(func(context.Context, string, string, string, spec.Platform, string) (string, error) {
+	restoreFetch := fetch.SetPullArchive(func(context.Context, string, string, string, spec.Platform, string) (string, error) {
 		return "", ocix.ErrArchiveNotFound
 	})
 	defer restoreFetch()

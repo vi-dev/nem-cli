@@ -116,6 +116,34 @@ func TestTaskDoneAfterFailIsNoOp(t *testing.T) {
 	}
 }
 
+// TestTaskDiscardEmitsNothing proves Discard's whole point: unlike
+// Done/Fail, it never renders a completion line — on a non-TTY console
+// (no live block to begin with) the discard itself produces zero output.
+func TestTaskDiscardEmitsNothing(t *testing.T) {
+	c, _, errb := newTest(Options{Color: ColorNever})
+	task := c.Task("Mirroring curl")
+	task.Status("probing")
+
+	task.Discard()
+
+	if errb.Len() != 0 {
+		t.Errorf("Discard produced output: %q", errb.String())
+	}
+}
+
+func TestTaskFailAfterDiscardIsNoOp(t *testing.T) {
+	c, _, errb := newTest(Options{Color: ColorNever})
+	task := c.Task("Mirroring curl")
+	task.Discard()
+	errb.Reset()
+
+	task.Fail("Failed curl")
+
+	if errb.Len() != 0 {
+		t.Errorf("Fail after Discard must be a no-op, got %q", errb.String())
+	}
+}
+
 func TestDurSuffix(t *testing.T) {
 	cases := []struct {
 		d    time.Duration

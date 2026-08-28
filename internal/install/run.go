@@ -53,10 +53,10 @@ func Run(ctx context.Context, h home.Home, rep report.Reporter, jobs []Job) erro
 	}
 
 	g, gctx := errgroup.WithContext(ctx)
-	sem := make(chan struct{}, min(runtime.NumCPU(), 8))
+	g.SetLimit(min(runtime.NumCPU(), 8))
 
 	for _, job := range jobs {
-		g.Go(func() error { return runJob(gctx, h, rep, job, sem) })
+		g.Go(func() error { return runJob(gctx, h, rep, job) })
 	}
 	if err := g.Wait(); err != nil {
 		return err
@@ -66,7 +66,7 @@ func Run(ctx context.Context, h home.Home, rep report.Reporter, jobs []Job) erro
 
 // runJob installs one job, or reports it cancelled if gctx ends before or
 // during the attempt; see Run's doc comment for the reporting contract.
-func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job, sem chan struct{}) error {
+func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job) error {
 	name, version := job.Pkg.Name, job.Version
 	if IsInstalled(h, name, version) {
 		return nil
@@ -77,14 +77,6 @@ func runJob(gctx context.Context, h home.Home, rep report.Reporter, job Job, sem
 	// The task outcome names the job, not the error: the error is returned
 	// and rendered once by the caller, so echoing it here printed it twice.
 	failedOutcome := fmt.Sprintf("Failed %s %s", name, version)
-
-	select {
-	case sem <- struct{}{}:
-		defer func() { <-sem }()
-	case <-gctx.Done():
-		rep.Task(label).Fail(cancelled)
-		return nil
-	}
 
 	task := rep.Task(label)
 	if isCancellation(gctx, nil) {

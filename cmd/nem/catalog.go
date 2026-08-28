@@ -7,23 +7,26 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 )
 
 // syncCatalog is swapped in tests; production uses the real remote.
-var syncCatalog = func(ctx context.Context, ref, storePath string) (string, error) {
+var syncCatalog = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) (string, error) {
 	src, srcRef, err := ocix.RemoteCatalog(ref)
 	if err != nil {
 		return "", err
 	}
-	return ocix.SyncFrom(ctx, src, srcRef, storePath)
+	store, err := ocix.SyncLocalCatalog(ctx, src, srcRef, storePath, progress)
+	if err != nil {
+		return "", err
+	}
+	return store.Digest(), nil
 }
 
 const (
@@ -41,7 +44,7 @@ func newCatalogCmd() *cobra.Command {
 		&cobra.Group{ID: catalogGroupMaintenance, Title: "Catalog maintenance:"},
 	)
 	addGrouped(cmd, catalogGroupConsumption, newCatalogAddCmd(), newCatalogListCmd(), newCatalogRemoveCmd(), newCatalogUpdateCmd(), newCatalogReorderCmd(), newCatalogDisableCmd(), newCatalogEnableCmd())
-	addGrouped(cmd, catalogGroupMaintenance, newCatalogLintCmd(), newCatalogFmtCmd(), newCatalogBuildCmd(), newCatalogTestCmd(), newCatalogBumpCmd(), newCatalogOutdatedCmd(), newCatalogMissingCmd(), newCatalogDiffCmd(), newCatalogPublishCmd())
+	addGrouped(cmd, catalogGroupMaintenance, newCatalogLintCmd(), newCatalogFmtCmd(), newCatalogBuildCmd(), newCatalogTestCmd(), newCatalogBumpCmd(), newCatalogOutdatedCmd(), newCatalogMissingCmd(), newCatalogDiffCmd(), newCatalogPublishCmd(), newCatalogMirrorCmd(), newCatalogFillCmd())
 	return cmd
 }
 
@@ -66,14 +69,14 @@ func newCatalogAddCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}
 			if cfg.Find(name) != nil {
 				return fmt.Errorf("catalog %s already exists", name)
 			}
-			entry := catalog.Entry{Name: name, Type: entryType}
+			entry := config.CatalogEntry{Name: name, Type: entryType}
 			switch entryType {
 			case "dir":
 				abs, err := filepath.Abs(ref)
@@ -82,7 +85,7 @@ func newCatalogAddCmd() *cobra.Command {
 				}
 				entry.Path = abs
 			case "oci":
-				if err := ocix.ValidateRef(ref); err != nil {
+				if err := ocix.WithTagOrDigest(ref); err != nil {
 					return err
 				}
 				entry.Ref = ref
@@ -90,7 +93,7 @@ func newCatalogAddCmd() *cobra.Command {
 				return fmt.Errorf("invalid --type %q (want oci or dir)", entryType)
 			}
 			cfg.Catalogs = append(cfg.Catalogs, entry)
-			if err := catalog.SaveConfig(nemHome, cfg); err != nil {
+			if err := config.SaveConfig(nemHome, cfg); err != nil {
 				return err
 			}
 			console.Success("Added catalog %s", name)
@@ -110,7 +113,7 @@ func newCatalogListCmd() *cobra.Command {
 		Short: "List configured catalogs",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}
@@ -144,11 +147,11 @@ func newCatalogRemoveCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}
-			idx := slices.IndexFunc(cfg.Catalogs, func(e catalog.Entry) bool { return e.Name == name })
+			idx := slices.IndexFunc(cfg.Catalogs, func(e config.CatalogEntry) bool { return e.Name == name })
 			if idx == -1 {
 				return fmt.Errorf("catalog %s is not configured", name)
 			}
@@ -163,7 +166,7 @@ func newCatalogRemoveCmd() *cobra.Command {
 				return err
 			}
 			cfg.Catalogs = slices.Delete(cfg.Catalogs, idx, idx+1)
-			if err := catalog.SaveConfig(nemHome, cfg); err != nil {
+			if err := config.SaveConfig(nemHome, cfg); err != nil {
 				return err
 			}
 			console.Success("Removed catalog %s", name)
@@ -183,7 +186,7 @@ func newCatalogUpdateCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}
@@ -219,17 +222,21 @@ func newCatalogUpdateCmd() *cobra.Command {
 	}
 }
 
-func syncOne(ctx context.Context, e catalog.Entry) error {
+func syncOne(ctx context.Context, e config.CatalogEntry) error {
 	store, err := nemHome.CatalogStore(e.Name)
 	if err != nil {
 		return err
 	}
-	start := time.Now()
-	if _, err := syncCatalog(ctx, e.Ref, store); err != nil {
-		return err
+	labels := report.TaskLabels{
+		Run:    "Syncing catalog " + e.Name,
+		Status: "copying",
+		Done:   "Synced catalog " + e.Name,
+		Fail:   "Sync failed",
 	}
-	console.Success("Synced catalog %s%s", e.Name, report.DurSuffix(time.Since(start)))
-	return nil
+	return report.RunTask(console, labels, func(count func(done, total int64)) error {
+		_, err := syncCatalog(ctx, e.Ref, store, count)
+		return err
+	})
 }
 
 func newCatalogReorderCmd() *cobra.Command {
@@ -243,14 +250,14 @@ func newCatalogReorderCmd() *cobra.Command {
 				return err
 			}
 			defer release()
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}
 			if err := cfg.Reorder(args); err != nil {
 				return err
 			}
-			if err := catalog.SaveConfig(nemHome, cfg); err != nil {
+			if err := config.SaveConfig(nemHome, cfg); err != nil {
 				return err
 			}
 			console.Success("Reordered catalogs")
@@ -283,7 +290,7 @@ func setCatalogsDisabled(names []string, disabled bool) error {
 		return err
 	}
 	defer release()
-	cfg, err := catalog.OpenConfig(nemHome)
+	cfg, err := config.OpenConfig(nemHome)
 	if err != nil {
 		return err
 	}
@@ -296,7 +303,7 @@ func setCatalogsDisabled(names []string, disabled bool) error {
 		}
 		entry.Disabled = disabled
 	}
-	if err := catalog.SaveConfig(nemHome, cfg); err != nil {
+	if err := config.SaveConfig(nemHome, cfg); err != nil {
 		return err
 	}
 	verb := "Disabled"

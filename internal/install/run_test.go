@@ -94,6 +94,7 @@ type fakeTask struct {
 func (t *fakeTask) Status(string)         {}
 func (t *fakeTask) Progress(int64, int64) {}
 func (t *fakeTask) Count(int, int)        {}
+func (t *fakeTask) Discard()              {}
 
 func (t *fakeTask) Done(outcome string) {
 	t.mu.Lock()

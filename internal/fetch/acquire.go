@@ -7,13 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"text/template"
 
 	"oras.land/oras-go/v2/registry"
 
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
@@ -26,7 +26,7 @@ type Source struct {
 
 // httpClient is the client Acquire's upstream downloads use; overridable in
 // tests.
-var httpClient = http.DefaultClient
+var httpClient = netx.Client()
 
 // pullArchive opens catalogRef's archives repo for name and pulls tag/plat
 // from it into dir; overridden in tests.
@@ -38,11 +38,11 @@ var pullArchive = func(ctx context.Context, catalogRef, name, tag string, plat s
 	return ocix.PullArchiveFrom(ctx, repo, tag, plat, dir)
 }
 
-// SetPullArchiveForTest swaps the pullArchive package var Acquire's
+// SetPullArchive swaps the pullArchive package var Acquire's
 // registry-first fetch path uses and returns a closure that restores the
 // previous implementation. Test-only: it lets a caller outside this
 // package stub the registry pull without a real OCI registry.
-func SetPullArchiveForTest(f func(ctx context.Context, catalogRef, name, tag string, plat spec.Platform, dir string) (string, error)) (restore func()) {
+func SetPullArchive(f func(ctx context.Context, catalogRef, name, tag string, plat spec.Platform, dir string) (string, error)) (restore func()) {
 	prev := pullArchive
 	pullArchive = f
 	return func() { pullArchive = prev }

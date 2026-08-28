@@ -50,7 +50,7 @@ func newCatalogDiffCmd() *cobra.Command {
 			if len(args) == 2 {
 				target = args[1]
 			}
-			if err := ocix.ValidateRef(ref); err != nil {
+			if err := ocix.WithTagOrDigest(ref); err != nil {
 				return err
 			}
 			info, err := os.Stat(target)
@@ -68,7 +68,7 @@ func newCatalogDiffCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			idx, _, err := ocix.FetchIndex(cmd.Context(), src, srcRef)
+			idx, _, err := ocix.FetchCatalogIndex(cmd.Context(), src, srcRef)
 			if err != nil {
 				return err
 			}
@@ -171,7 +171,7 @@ func diffOne(ctx context.Context, src oras.ReadOnlyTarget, published map[string]
 		}
 		return row, nil
 	}
-	desc, err := ocix.PackageManifestDescriptor(data)
+	_, desc, err := ocix.PackageManifest(data)
 	if err != nil {
 		return diffRow{}, fmt.Errorf("%s: %w", path, err)
 	}

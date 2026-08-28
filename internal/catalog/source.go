@@ -1,3 +1,5 @@
+// Package catalog resolves configured sources and looks up packages in
+// them; config.yaml's document model lives in internal/config.
 package catalog
 
 import (

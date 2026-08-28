@@ -3,13 +3,17 @@ package ocix
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"sort"
 
+	"github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
+	"oras.land/oras-go/v2/errdef"
 
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -24,25 +28,17 @@ func RemoteArchivesRW(catalogRef, name string) (oras.Target, error) {
 	return NewRemoteRepository(archivesRef)
 }
 
-// PushArchive publishes archiveBytes as plat's entry of the multi-platform
-// archive index tagged tag, merging into any existing index so other
-// platforms are preserved. It returns the platform manifest descriptor and
-// whether a push happened — false means plat was already published
-// byte-identical and force was not set.
+// PushArchive merges archiveBytes into tag's index as plat's entry.
+// pushed is false when plat was already published byte-identical and
+// force wasn't set.
 func PushArchive(ctx context.Context, target oras.Target, tag string, plat spec.Platform, archiveBytes []byte, force bool) (ocispec.Descriptor, bool, error) {
 	layerDesc := content.NewDescriptorFromBytes(MediaTypeArchive, archiveBytes)
-	manBytes, err := json.Marshal(ocispec.Manifest{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: ocispec.MediaTypeImageManifest,
-		Config:    ocispec.DescriptorEmptyJSON,
-		Layers:    []ocispec.Descriptor{layerDesc},
-	})
+	manBytes, manDesc, err := archiveManifest(layerDesc)
 	if err != nil {
-		return ocispec.Descriptor{}, false, fmt.Errorf("marshal archive manifest: %w", err)
+		return ocispec.Descriptor{}, false, err
 	}
-	manDesc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, manBytes)
 
-	idx, err := loadIndex(ctx, target, tag)
+	idx, err := loadArchiveIndex(ctx, target, tag)
 	if err != nil {
 		return ocispec.Descriptor{}, false, err
 	}
@@ -61,20 +57,127 @@ func PushArchive(ctx context.Context, target oras.Target, tag string, plat spec.
 	}
 
 	entry := withPlatform(manDesc, plat)
-	merged := mergeManifests(idx.Manifests, entry, plat)
-	idxBytes, err := json.Marshal(ocispec.Index{
-		Versioned: specs.Versioned{SchemaVersion: 2},
-		MediaType: ocispec.MediaTypeImageIndex,
-		Manifests: merged,
-	})
-	if err != nil {
-		return ocispec.Descriptor{}, false, fmt.Errorf("marshal archive index: %w", err)
-	}
-	idxDesc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageIndex, idxBytes)
-	if err := PushIndex(ctx, target, idxBytes, idxDesc, []string{tag}); err != nil {
+	if _, err := CommitArchiveManifests(ctx, target, tag, []ocispec.Descriptor{entry}); err != nil {
 		return ocispec.Descriptor{}, false, err
 	}
 	return entry, true, nil
+}
+
+// PublishArchiveLayerFile pushes path's contents as plat's layer and
+// manifest into target — never touching tag's index; the caller batches
+// several platforms into one CommitArchiveManifests call.
+func PublishArchiveLayerFile(ctx context.Context, target oras.Target, plat spec.Platform, path, sha256Hex string, size int64) (ocispec.Descriptor, error) {
+	layerDesc := ocispec.Descriptor{
+		MediaType: MediaTypeArchive,
+		Digest:    digest.NewDigestFromEncoded(digest.SHA256, sha256Hex),
+		Size:      size,
+	}
+	manBytes, manDesc, err := archiveManifest(layerDesc)
+	if err != nil {
+		return ocispec.Descriptor{}, err
+	}
+
+	err = withRetry(ctx, func(ctx context.Context) error {
+		if err := PushEmptyConfig(ctx, target); err != nil {
+			return err
+		}
+		if err := pushArchiveLayerFile(ctx, target, layerDesc, path); err != nil {
+			return err
+		}
+		return pushBlobIfAbsent(ctx, target, manDesc, manBytes)
+	})
+	if err != nil {
+		return ocispec.Descriptor{}, err
+	}
+	return withPlatform(manDesc, plat), nil
+}
+
+// pushArchiveLayerFile streams path in; path is reopened fresh on every
+// call, so a retry never gets a partially-consumed reader.
+func pushArchiveLayerFile(ctx context.Context, target oras.Target, layerDesc ocispec.Descriptor, path string) error {
+	exists, err := target.Exists(ctx, layerDesc)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+	if err := target.Push(ctx, layerDesc, f); err != nil && !errors.Is(err, errdef.ErrAlreadyExists) {
+		return err
+	}
+	return nil
+}
+
+func archiveManifest(layerDesc ocispec.Descriptor) ([]byte, ocispec.Descriptor, error) {
+	manBytes, err := json.Marshal(ocispec.Manifest{
+		Versioned: specs.Versioned{SchemaVersion: 2},
+		MediaType: ocispec.MediaTypeImageManifest,
+		Config:    ocispec.DescriptorEmptyJSON,
+		Layers:    []ocispec.Descriptor{layerDesc},
+	})
+	if err != nil {
+		return nil, ocispec.Descriptor{}, fmt.Errorf("marshal archive manifest: %w", err)
+	}
+	return manBytes, content.NewDescriptorFromBytes(ocispec.MediaTypeImageManifest, manBytes), nil
+}
+
+// CommitArchiveManifests merges entries into tag's index with one
+// push+retag, regardless of batch size. A no-op merge pushes nothing;
+// called with no entries, it's a no-op entirely.
+func CommitArchiveManifests(ctx context.Context, target oras.Target, tag string, entries []ocispec.Descriptor) (ocispec.Descriptor, error) {
+	if len(entries) == 0 {
+		return ocispec.Descriptor{}, nil
+	}
+
+	var result ocispec.Descriptor
+	err := withRetry(ctx, func(ctx context.Context) error {
+		cur, curErr := target.Resolve(ctx, tag)
+		var idx ocispec.Index
+		switch {
+		case curErr == nil:
+			data, err := content.FetchAll(ctx, target, cur)
+			if err != nil {
+				return fmt.Errorf("read archive index %s: %w", tag, err)
+			}
+			if err := json.Unmarshal(data, &idx); err != nil {
+				return fmt.Errorf("parse archive index %s: %w", tag, err)
+			}
+		case archiveAbsent(curErr):
+			// No current index: every entry is new.
+		default:
+			return fmt.Errorf("resolve archive index %s: %w", tag, curErr)
+		}
+
+		merged := idx.Manifests
+		for _, entry := range entries {
+			merged = mergeManifests(merged, entry)
+		}
+		idxBytes, err := json.Marshal(ocispec.Index{
+			Versioned: specs.Versioned{SchemaVersion: 2},
+			MediaType: ocispec.MediaTypeImageIndex,
+			Manifests: merged,
+		})
+		if err != nil {
+			return fmt.Errorf("marshal archive index: %w", err)
+		}
+		idxDesc := content.NewDescriptorFromBytes(ocispec.MediaTypeImageIndex, idxBytes)
+
+		if curErr == nil && cur.Digest == idxDesc.Digest {
+			result = idxDesc
+			return nil
+		}
+		if err := PushBlobAndTag(ctx, target, idxBytes, idxDesc, []string{tag}); err != nil {
+			return err
+		}
+		result = idxDesc
+		return nil
+	})
+	return result, err
 }
 
 // withPlatform copies d and stamps plat on it (index-entry metadata; the
@@ -85,12 +188,12 @@ func withPlatform(d ocispec.Descriptor, plat spec.Platform) ocispec.Descriptor {
 	return d
 }
 
-// mergeManifests drops any existing entry for plat, appends entry, and keeps
-// the list sorted by os/arch so a fixed platform set serializes identically.
-func mergeManifests(mans []ocispec.Descriptor, entry ocispec.Descriptor, plat spec.Platform) []ocispec.Descriptor {
+// mergeManifests drops any existing entry sharing entry's platform and
+// keeps the result sorted, so a fixed platform set serializes identically.
+func mergeManifests(mans []ocispec.Descriptor, entry ocispec.Descriptor) []ocispec.Descriptor {
 	out := make([]ocispec.Descriptor, 0, len(mans)+1)
 	for _, m := range mans {
-		if m.Platform != nil && m.Platform.OS == plat.OS && m.Platform.Architecture == plat.Arch {
+		if m.Platform != nil && platKey(m) == platKey(entry) {
 			continue
 		}
 		out = append(out, m)
@@ -107,9 +210,9 @@ func platKey(d ocispec.Descriptor) string {
 	return d.Platform.OS + "/" + d.Platform.Architecture
 }
 
-// loadIndex reads the archive index at tag, or returns an empty index and a
+// loadArchiveIndex reads the archive index at tag, or returns an empty index and a
 // nil error when the tag or repo is absent.
-func loadIndex(ctx context.Context, target oras.Target, tag string) (ocispec.Index, error) {
+func loadArchiveIndex(ctx context.Context, target oras.Target, tag string) (ocispec.Index, error) {
 	desc, err := target.Resolve(ctx, tag)
 	if err != nil {
 		if archiveAbsent(err) {

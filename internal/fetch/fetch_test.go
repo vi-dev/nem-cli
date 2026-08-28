@@ -33,6 +33,7 @@ func (f *fakeTask) Status(string)  {}
 func (f *fakeTask) Count(int, int) {}
 func (f *fakeTask) Done(string)    {}
 func (f *fakeTask) Fail(string)    {}
+func (f *fakeTask) Discard()       {}
 func (f *fakeTask) Progress(done, total int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

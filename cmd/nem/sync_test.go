@@ -336,7 +336,7 @@ func syncedOCICatalogStore(t *testing.T, h home.Home, name string) {
 		Name: "tool", Description: "a test tool", Latest: "v1.0.0",
 		YAML: []byte(syncToolYAML),
 	}}, "2")
-	if _, err := ocix.SyncFrom(context.Background(), src, "v2", storePath); err != nil {
+	if _, err := ocix.SyncLocalCatalog(context.Background(), src, "v2", storePath, nil); err != nil {
 		t.Fatalf("SyncFrom: %v", err)
 	}
 }

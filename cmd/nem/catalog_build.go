@@ -8,6 +8,7 @@ import (
 
 	"github.com/vi-dev/nem-cli/internal/build"
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/pkgtest"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -37,7 +38,7 @@ func newCatalogBuildCmd() *cobra.Command {
 				console.Info("%s does not support %s", pkg.Name, plat)
 				return nil
 			}
-			cfg, err := catalog.OpenConfig(nemHome)
+			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
 				return err
 			}

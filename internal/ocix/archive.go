@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/opencontainers/go-digest"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content"
@@ -49,35 +50,68 @@ func RemoteArchives(catalogRef, name string) (oras.ReadOnlyTarget, error) {
 // callers can errors.Is against it). Any other resolve/fetch error (auth,
 // network, digest mismatch) is wrapped and passed through unchanged.
 func PullArchiveFrom(ctx context.Context, src oras.ReadOnlyTarget, srcRef string, plat spec.Platform, dir string) (string, error) {
-	idx, err := fetchArchiveIndex(ctx, src, srcRef)
+	layerDesc, err := resolveArchiveLayer(ctx, src, srcRef, plat)
 	if err != nil {
 		return "", err
-	}
-
-	manifestDesc, ok := manifestForPlatform(idx, plat)
-	if !ok {
-		return "", fmt.Errorf("platform %s: %w", plat, ErrArchiveNotFound)
-	}
-
-	manData, err := content.FetchAll(ctx, src, manifestDesc)
-	if err != nil {
-		return "", fmt.Errorf("read archive manifest: %w", err)
-	}
-	var man ocispec.Manifest
-	if err := json.Unmarshal(manData, &man); err != nil {
-		return "", fmt.Errorf("parse archive manifest: %w", err)
-	}
-
-	layerDesc, ok := archiveLayer(man)
-	if !ok {
-		return "", fmt.Errorf("archive manifest for %s has no %s layer", plat, MediaTypeArchive)
 	}
 	data, err := content.FetchAll(ctx, src, layerDesc)
 	if err != nil {
 		return "", fmt.Errorf("read archive layer: %w", err)
 	}
-
 	return writeTempArchive(dir, data)
+}
+
+// ResolveArchiveTag fetches no blobs — a Resolve only, for mirror's
+// digest-equality presence checks. Missing reports ErrArchiveNotFound.
+func ResolveArchiveTag(ctx context.Context, target oras.ReadOnlyTarget, tag string) (ocispec.Descriptor, error) {
+	desc, err := target.Resolve(ctx, tag)
+	if err != nil {
+		if archiveAbsent(err) {
+			return ocispec.Descriptor{}, fmt.Errorf("resolve archive ref %s: %w", tag, ErrArchiveNotFound)
+		}
+		return ocispec.Descriptor{}, fmt.Errorf("resolve archive ref %s: %w", tag, err)
+	}
+	return desc, nil
+}
+
+// ArchiveLayerDigest returns plat's archive layer digest without fetching
+// the layer itself, so fill's heal check can compare against the pinned
+// sha256 without downloading the archive back.
+func ArchiveLayerDigest(ctx context.Context, src oras.ReadOnlyTarget, tag string, plat spec.Platform) (digest.Digest, error) {
+	layerDesc, err := resolveArchiveLayer(ctx, src, tag, plat)
+	if err != nil {
+		return "", err
+	}
+	return layerDesc.Digest, nil
+}
+
+// resolveArchiveLayer fetches only the index and platform manifest, never
+// the layer itself.
+func resolveArchiveLayer(ctx context.Context, src oras.ReadOnlyTarget, tag string, plat spec.Platform) (ocispec.Descriptor, error) {
+	idx, err := fetchArchiveIndex(ctx, src, tag)
+	if err != nil {
+		return ocispec.Descriptor{}, err
+	}
+
+	manifestDesc, ok := manifestForPlatform(idx, plat)
+	if !ok {
+		return ocispec.Descriptor{}, fmt.Errorf("platform %s: %w", plat, ErrArchiveNotFound)
+	}
+
+	manData, err := content.FetchAll(ctx, src, manifestDesc)
+	if err != nil {
+		return ocispec.Descriptor{}, fmt.Errorf("read archive manifest: %w", err)
+	}
+	var man ocispec.Manifest
+	if err := json.Unmarshal(manData, &man); err != nil {
+		return ocispec.Descriptor{}, fmt.Errorf("parse archive manifest: %w", err)
+	}
+
+	layerDesc, ok := archiveLayer(man)
+	if !ok {
+		return ocispec.Descriptor{}, fmt.Errorf("archive manifest for %s has no %s layer", plat, MediaTypeArchive)
+	}
+	return layerDesc, nil
 }
 
 // ArchivePlatforms resolves tag on src, expecting a multi-platform archive
@@ -128,8 +162,7 @@ func archiveAbsent(err error) bool {
 	if errors.Is(err, errdef.ErrNotFound) {
 		return true
 	}
-	var resp *errcode.ErrorResponse
-	if errors.As(err, &resp) {
+	if resp, ok := errors.AsType[*errcode.ErrorResponse](err); ok {
 		return resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusNotFound
 	}
 	return false

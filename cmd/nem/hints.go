@@ -3,6 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net/http"
+	"net/url"
+
+	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
 	"github.com/vi-dev/nem-cli/internal/ocix"
@@ -42,6 +46,17 @@ func hintFor(err error) string {
 	var sce *resolve.SonameConflictError
 	if errors.As(err, &sce) {
 		return fmt.Sprintf("Unuse one of the conflicting tools, or re-pin %s to a version they all accept", sce.Name)
+	}
+	var eresp *errcode.ErrorResponse
+	if errors.As(err, &eresp) && eresp.StatusCode == http.StatusUnauthorized {
+		if eresp.URL != nil && eresp.URL.Host != "" {
+			return fmt.Sprintf("Run `docker login %s`", eresp.URL.Host)
+		}
+		return "Run `docker login`"
+	}
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return "Check your network connection or proxy settings"
 	}
 	return ""
 }

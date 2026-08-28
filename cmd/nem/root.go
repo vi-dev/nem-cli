@@ -7,7 +7,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/home"
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/report"
 )
 
@@ -45,6 +47,16 @@ func newRoot() *cobra.Command {
 				IsTTY:   term.IsTerminal(int(os.Stderr.Fd())),
 			})
 			nemHome = home.Resolve(os.Getenv)
+			hosts, warnings := config.LoadHostSettingsLenient(nemHome)
+			for _, w := range warnings {
+				console.Warn("%s", w)
+			}
+			// config and netx don't import each other, so their per-host types are translated here.
+			settings := make(map[string]netx.HostSettings, len(hosts))
+			for host, e := range hosts {
+				settings[host] = netx.HostSettings{CA: e.CA, PlainHTTP: e.PlainHTTP, Insecure: e.Insecure}
+			}
+			netx.Set(settings)
 			return nil
 		},
 	}

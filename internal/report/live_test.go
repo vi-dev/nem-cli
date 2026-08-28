@@ -50,6 +50,59 @@ func TestLiveSingleTaskShowsLabelAndSegment(t *testing.T) {
 	tk.Done("Installed go v1.26.5")
 }
 
+// TestLiveCountAloneRendersNothingUntilStatusIsSet pins the exact
+// mechanism a real caller can trip on: a task's live line only ever shows
+// a trailing segment, count included, once Status has given it one —
+// trailingText returns "" outright when segment is empty, never even
+// reaching progressText's count rendering. A caller that reports Count
+// without ever calling Status renders a bare label forever.
+func TestLiveCountAloneRendersNothingUntilStatusIsSet(t *testing.T) {
+	c, _, errb := newLiveTest(Options{IsTTY: true, Color: ColorNever})
+	tk := c.Task("Syncing catalog")
+	tk.Count(3, 10)
+	c.repaint()
+
+	if got := errb.String(); strings.Contains(got, "3/10") {
+		t.Fatalf("Count alone must not render: %q", got)
+	}
+
+	tk.Status("copying")
+	c.repaint()
+	if got := errb.String(); !strings.Contains(got, "copying 3/10") {
+		t.Fatalf("Status set after Count must render the count alongside it: %q", got)
+	}
+	tk.Done("Synced catalog")
+}
+
+// TestLiveDiscardShrinksBlockWithNoCompletionLine proves Discard's live
+// behavior end to end: the discarded task's line disappears from the
+// block, the block shrinks by exactly one line, and — unlike Done/Fail —
+// nothing prints in its place, not even a blank line.
+func TestLiveDiscardShrinksBlockWithNoCompletionLine(t *testing.T) {
+	c, _, errb := newLiveTest(Options{IsTTY: true, Color: ColorNever})
+	first := c.Task("Mirroring curl")
+	first.Status("probing")
+	second := c.Task("Mirroring go")
+	second.Status("copying 1.26.5")
+	c.repaint()
+	errb.Reset()
+
+	first.Discard()
+
+	got := errb.String()
+	if strings.Contains(got, "Mirroring curl") {
+		t.Errorf("discarded task's line still present: %q", got)
+	}
+	if strings.Contains(got, "✓") || strings.Contains(got, "✗") {
+		t.Errorf("Discard rendered a completion glyph: %q", got)
+	}
+	if !strings.Contains(got, "Mirroring go") {
+		t.Errorf("surviving task not repainted after the discard: %q", got)
+	}
+
+	second.Done("Mirrored go (1 tag copied)")
+}
+
 func TestLiveTwoTasksInStartOrder(t *testing.T) {
 	c, _, errb := newLiveTest(Options{IsTTY: true, Color: ColorNever})
 	first := c.Task("Installing go v1.26.5")

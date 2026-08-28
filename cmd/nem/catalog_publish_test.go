@@ -36,7 +36,7 @@ func TestCatalogPublishPushesToTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("oci.New: %v", err)
 	}
-	restore := publish.SetTargetOpenerForTest(func(context.Context, string) (oras.Target, error) { return store, nil })
+	restore := publish.SetTargetOpener(func(context.Context, string) (oras.Target, error) { return store, nil })
 	defer restore()
 
 	nemHome := t.TempDir()
@@ -56,7 +56,7 @@ func TestCatalogPublishDryRunWritesNothing(t *testing.T) {
 		t.Fatalf("oci.New: %v", err)
 	}
 	var opened bool
-	restore := publish.SetTargetOpenerForTest(func(context.Context, string) (oras.Target, error) {
+	restore := publish.SetTargetOpener(func(context.Context, string) (oras.Target, error) {
 		opened = true
 		return store, nil
 	})

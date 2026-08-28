@@ -26,7 +26,7 @@ type FakeEntry struct {
 // per entry, each wrapping a pkg.yaml layer) and pushes it into store,
 // tagging the resulting index "v2". It is the fake registry used by ocix
 // and catalog tests: an oci.New layout store stands in for the remote, and
-// SyncFrom copies layout-to-layout with no network involved.
+// SyncLocalCatalog copies layout-to-layout with no network involved.
 func PushFakeCatalogForTest(t testing.TB, store oras.Target, entries []FakeEntry, schemaVersion string) ocispec.Descriptor {
 	t.Helper()
 	ctx := context.Background()

@@ -25,7 +25,7 @@ import (
 // swapOpenTarget swaps the target opener Publish uses for f, returning a
 // closure that restores the previous one.
 func swapOpenTarget(f func(context.Context, string) (oras.Target, error)) (restore func()) {
-	return SetTargetOpenerForTest(f)
+	return SetTargetOpener(f)
 }
 
 // swapNow swaps the clock Publish uses for the release tag for f,

@@ -2,9 +2,12 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/report"
 )
 
@@ -65,6 +68,43 @@ func TestColorFlagValidation(t *testing.T) {
 	root.SetErr(new(bytes.Buffer))
 	if err := root.Execute(); err == nil {
 		t.Fatal("want error for invalid --color value")
+	}
+}
+
+func TestRootHookNeverCreatesConfigFile(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	out, errb, err := runNem(t, nemHomeDir, "version")
+	if err != nil {
+		t.Fatalf("version: %v\nstderr: %s", err, errb)
+	}
+	if out == "" {
+		t.Fatal("version produced no output")
+	}
+	h := home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return nemHomeDir
+		}
+		return ""
+	})
+	if _, err := os.Stat(h.Config()); !os.IsNotExist(err) {
+		t.Fatalf("root hook's lenient config load must never create config.yaml, stat err = %v", err)
+	}
+}
+
+func TestRootHookWarnsOnMalformedConfigAndKeepsRunning(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	if err := os.MkdirAll(nemHomeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(nemHomeDir, "config.yaml"), []byte("hosts: [this is not: valid yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, errb, err := runNem(t, nemHomeDir, "version")
+	if err != nil {
+		t.Fatalf("version must still succeed on a malformed config: %v\nstderr: %s", err, errb)
+	}
+	if !strings.Contains(errb, "host settings") {
+		t.Fatalf("stderr = %q, want a host settings warning", errb)
 	}
 }
 

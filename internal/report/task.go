@@ -16,14 +16,15 @@ type Reporter interface {
 }
 
 // Task is a handle to one named unit of work. Status/Progress/Count only
-// update internal state; Done/Fail are the only methods that render
-// anything outside a live TTY block.
+// update internal state; Done/Fail/Discard are the only methods that
+// resolve it, each exactly once.
 type Task interface {
 	Status(segment string)      // current subtask: "downloading"
 	Progress(done, total int64) // → "34%"; total<0 → "12 MB"
 	Count(done, total int)      // → "12/366"
 	Done(outcome string)        // "✓ <outcome> (9s)" — duration auto ≥1s
 	Fail(outcome string)        // "✗ <outcome>" — always emits (diagnostic)
+	Discard()                   // remove silently — no line, ever
 }
 
 var _ Reporter = (*Console)(nil)
@@ -105,6 +106,15 @@ func (t *task) Fail(outcome string) {
 			fmt.Fprintf(c.err, "ERROR %s\n", outcome)
 		}
 	})
+}
+
+// Discard removes t from view without ever rendering a completion line;
+// idempotent, and a no-op against a racing Done/Fail either way.
+func (t *task) Discard() {
+	if !t.markCompleted() {
+		return
+	}
+	t.console.completeTask(t, func() {})
 }
 
 // markCompleted flips t.completed and reports whether this call was the

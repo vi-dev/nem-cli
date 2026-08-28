@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/project"
@@ -43,7 +44,7 @@ func runSync(cmd *cobra.Command, global bool) error {
 
 	warnManifestDrift(manifestP, lock)
 
-	cfg, err := catalog.OpenConfig(nemHome)
+	cfg, err := config.OpenConfig(nemHome)
 	if err != nil {
 		return err
 	}

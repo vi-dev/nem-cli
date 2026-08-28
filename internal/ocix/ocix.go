@@ -16,7 +16,8 @@ const (
 	// the nem catalog schema version.
 	AnnotationSchemaVersion = "org.vi-dev.nem.catalog.schemaVersion"
 	// SchemaVersion is the nem catalog schema version this build understands.
-	SchemaVersion = "2"
+	SchemaVersion    = "2"
+	SchemaVersionInt = 2
 	// AnnotationTitle is the OCI annotation carrying a package's name.
 	AnnotationTitle = "org.opencontainers.image.title"
 	// AnnotationDescription is the OCI annotation carrying a package's
@@ -29,7 +30,7 @@ const (
 	// the local OCI layout mirror.
 	LocalTag = "catalog"
 
-	// syncConcurrency bounds concurrent copy tasks during SyncFrom.
+	// syncConcurrency bounds concurrent copy tasks (CopyIndexClosure's only user).
 	syncConcurrency = 32
 )
 
@@ -41,8 +42,7 @@ var ErrNotSynced = errors.New("catalog store not synced")
 // has no manifest for the requested platform.
 var ErrArchiveNotFound = errors.New("archive not found in registry")
 
-// PkgNotInIndexError indicates a package name has no entry in the catalog
-// index.
+// PkgNotInIndexError indicates a package name has no entry in the catalog index.
 type PkgNotInIndexError struct{ Name string }
 
 func (e *PkgNotInIndexError) Error() string {

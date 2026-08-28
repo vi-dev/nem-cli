@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"github.com/vi-dev/nem-cli/internal/discover"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/fsx"
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
@@ -402,7 +402,7 @@ func buildEntry(ctx context.Context, pkg *spec.Package, target string) (spec.Ver
 			subject := pkg.Name + " " + target + " " + plat.String()
 			task := console.Task("Hashing " + subject)
 			meta := fetch.Meta{Name: pkg.Name, Version: target, Platform: plat}
-			sum, err := bumpDigest(gctx, http.DefaultClient, url, meta, task)
+			sum, err := bumpDigest(gctx, netx.Client(), url, meta, task)
 			if err != nil {
 				task.Fail("Download failed for " + subject)
 				return err
@@ -437,7 +437,7 @@ func buildOCIEntry(ctx context.Context, pkg *spec.Package, target string) (spec.
 	subject := pkg.Name + " " + target + " source"
 	task := console.Task("Hashing " + subject)
 	meta := fetch.Meta{Name: pkg.Name, Version: target, Platform: spec.Current()}
-	sum, err := bumpDigest(ctx, http.DefaultClient, url, meta, task)
+	sum, err := bumpDigest(ctx, netx.Client(), url, meta, task)
 	if err != nil {
 		task.Fail("Download failed for " + subject)
 		// A missing source tarball is a dead or wrong URL, not a

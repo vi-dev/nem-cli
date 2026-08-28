@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,9 +15,11 @@ import (
 	"oras.land/oras-go/v2/content"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/resolve"
@@ -53,7 +54,7 @@ var archivesOpener = ocix.RemoteArchivesRW
 // Build runs pkg's build recipe end to end: fetch and unpack its source,
 // resolve and install its build deps, run its steps with the composed
 // build env, then verify the harvested output tree is conformant.
-func Build(ctx context.Context, h home.Home, cfg *catalog.Config, sources []catalog.Named, pkg *spec.Package,
+func Build(ctx context.Context, h home.Home, cfg *config.Config, sources []catalog.Named, pkg *spec.Package,
 	opts Options, rep report.Reporter, stdout, stderr io.Writer) (Result, error) {
 	if pkg.Build == nil {
 		return Result{}, errors.New("package has no build section")
@@ -241,14 +242,14 @@ func fetchBuildSource(ctx context.Context, pkg *spec.Package, version, shaOverri
 	if err != nil {
 		return "", "", false, err
 	}
-	return fetchSource(ctx, http.DefaultClient, url, want, staging, fetch.Meta{Name: pkg.Name, Version: version, Platform: spec.Current()})
+	return fetchSource(ctx, netx.Client(), url, want, staging, fetch.Meta{Name: pkg.Name, Version: version, Platform: spec.Current()})
 }
 
 // ResolveDeps resolves deps as dependency edges of pkg (the same edge walk
 // and role assignment a package's runtime deps get), installs them, then
 // reads back each current-platform lock entry's install metadata to build
 // the deps ComposeEnv needs.
-func ResolveDeps(ctx context.Context, h home.Home, cfg *catalog.Config, sources []catalog.Named,
+func ResolveDeps(ctx context.Context, h home.Home, cfg *config.Config, sources []catalog.Named,
 	rep report.Reporter, pkg *spec.Package, deps []spec.Dep) ([]ResolvedDep, error) {
 	if len(deps) == 0 {
 		return nil, nil
@@ -265,7 +266,7 @@ func ResolveDeps(ctx context.Context, h home.Home, cfg *catalog.Config, sources 
 // Callers that resolve a closure themselves — rather than through
 // ResolveDeps — use this directly, so the source of the resolution is
 // theirs to choose.
-func InstallResolvedDeps(ctx context.Context, h home.Home, cfg *catalog.Config,
+func InstallResolvedDeps(ctx context.Context, h home.Home, cfg *config.Config,
 	rep report.Reporter, result *resolve.Result) ([]ResolvedDep, error) {
 	if err := install.Run(ctx, h, rep, currentPlatformJobs(cfg, result)); err != nil {
 		return nil, err
@@ -296,7 +297,7 @@ func InstallResolvedDeps(ctx context.Context, h home.Home, cfg *catalog.Config,
 // currentPlatformJobs builds install jobs for the entries the running
 // platform needs, pairing each with the oci ref of the catalog it came
 // from (empty for a dir catalog, or when cfg is nil).
-func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.Job {
+func currentPlatformJobs(cfg *config.Config, result *resolve.Result) []install.Job {
 	current := spec.Current().String()
 	var jobs []install.Job
 	for _, entry := range result.Entries {

@@ -12,11 +12,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/fetch"
 	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/project"
+	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/resolve"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -24,12 +26,12 @@ import (
 // syncCatalogStore syncs an oci catalog's local mirror from ref into
 // storePath; a package var so tests can override it without a real
 // registry.
-var syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+var syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 	src, srcRef, err := ocix.RemoteCatalog(ref)
 	if err != nil {
 		return err
 	}
-	_, err = ocix.SyncFrom(ctx, src, srcRef, storePath)
+	_, err = ocix.SyncLocalCatalog(ctx, src, srcRef, storePath, progress)
 	return err
 }
 
@@ -111,12 +113,12 @@ func manifestPath(global, createIfMissing bool) (string, error) {
 
 // loadUseState loads the target manifest plus the catalog config and
 // sources use/unuse resolve against.
-func loadUseState(path string) (*project.Manifest, *catalog.Config, []catalog.Named, error) {
+func loadUseState(path string) (*project.Manifest, *config.Config, []catalog.Named, error) {
 	manifest, err := project.LoadManifest(path)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	cfg, err := catalog.OpenConfig(nemHome)
+	cfg, err := config.OpenConfig(nemHome)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -161,7 +163,7 @@ func writeLock(manifest *project.Manifest, result *resolve.Result) error {
 // currentPlatformJobs builds install jobs for entries the running platform
 // needs, pairing each with the oci ref of the catalog it came from (empty
 // for a dir catalog).
-func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.Job {
+func currentPlatformJobs(cfg *config.Config, result *resolve.Result) []install.Job {
 	current := spec.Current().String()
 	var jobs []install.Job
 	for _, entry := range result.Entries {
@@ -195,7 +197,7 @@ func currentPlatformJobs(cfg *catalog.Config, result *resolve.Result) []install.
 // needed for resolution, catalog.Lookup surfaces ocix.ErrNotSynced for it
 // there, with the usual "nem catalog update" hint; if it wasn't needed, the
 // failure never mattered.
-func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config, sources []catalog.Named) error {
+func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *config.Config, sources []catalog.Named) error {
 	for _, n := range sources {
 		src, ok := n.Source.(mirrorOpener)
 		if !ok {
@@ -216,13 +218,18 @@ func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *catalog.Config, sources 
 		if err != nil {
 			return err
 		}
-		task := console.Task("Syncing catalog " + n.Name)
-		if err := syncCatalogStore(ctx, e.Ref, store); err != nil {
-			task.Fail(err.Error())
+		labels := report.TaskLabels{
+			Run:    "Syncing catalog " + n.Name,
+			Status: "copying",
+			Done:   "Synced catalog " + n.Name,
+			Fail:   "Sync failed",
+		}
+		if err := report.RunTask(console, labels, func(count func(done, total int64)) error {
+			return syncCatalogStore(ctx, e.Ref, store, count)
+		}); err != nil {
 			console.Warn("Could not sync catalog %s: %v", n.Name, err)
 			continue
 		}
-		task.Done("Synced catalog " + n.Name)
 	}
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 )
 
@@ -34,7 +35,7 @@ type searchHit struct {
 }
 
 func runSearch(cmd *cobra.Command, query string) error {
-	cfg, err := catalog.OpenConfig(nemHome)
+	cfg, err := config.OpenConfig(nemHome)
 	if err != nil {
 		return err
 	}

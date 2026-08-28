@@ -43,7 +43,7 @@ func newCatalogMissingCmd() *cobra.Command {
 			if len(args) == 2 {
 				target = args[1]
 			}
-			if err := ocix.ValidateBaseRef(ref); err != nil {
+			if err := ocix.WithoutTagOrDigest(ref); err != nil {
 				return err
 			}
 			paths, err := manifestPaths(target)

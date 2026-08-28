@@ -6,8 +6,20 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/vi-dev/nem-cli/internal/config"
+	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/project"
 )
+
+func testHome(t *testing.T) home.Home {
+	dir := t.TempDir()
+	return home.Resolve(func(k string) string {
+		if k == "NEM_HOME" {
+			return dir
+		}
+		return ""
+	})
+}
 
 func TestLookupFirstMatchWins(t *testing.T) {
 	a := writeDirCatalog(t, "shared", "only-a") // helper from dir_test.go
@@ -52,9 +64,9 @@ func TestLookupPinned(t *testing.T) {
 
 func TestOpenBuildsSourcesInOrder(t *testing.T) {
 	h := testHome(t)
-	cfg := &Config{Catalogs: []Entry{
+	cfg := &config.Config{Catalogs: []config.CatalogEntry{
 		{Name: "dev", Type: "dir", Path: t.TempDir()},
-		{Name: "official", Type: "oci", Ref: OfficialRef},
+		{Name: "official", Type: "oci", Ref: config.OfficialRef},
 	}}
 	named, err := Open(cfg, h)
 	if err != nil {
@@ -72,7 +84,7 @@ func TestOpenBuildsSourcesInOrder(t *testing.T) {
 }
 
 func TestOpenSkipsDisabled(t *testing.T) {
-	cfg := &Config{Catalogs: []Entry{
+	cfg := &config.Config{Catalogs: []config.CatalogEntry{
 		{Name: "a", Type: "dir", Path: "/tmp/a"},
 		{Name: "b", Type: "dir", Path: "/tmp/b", Disabled: true},
 		{Name: "c", Type: "dir", Path: "/tmp/c"},

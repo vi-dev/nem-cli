@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/ocix"
 	"github.com/vi-dev/nem-cli/internal/project"
@@ -11,7 +12,7 @@ import (
 )
 
 // Open builds a Source per configured catalog, in config (precedence) order.
-func Open(cfg *Config, h home.Home) ([]Named, error) {
+func Open(cfg *config.Config, h home.Home) ([]Named, error) {
 	out := make([]Named, 0, len(cfg.Catalogs))
 	for _, e := range cfg.Catalogs {
 		if e.Disabled {

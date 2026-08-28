@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/project"
 )
 
@@ -25,7 +26,7 @@ func runInfo(cmd *cobra.Command, arg string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := catalog.OpenConfig(nemHome)
+	cfg, err := config.OpenConfig(nemHome)
 	if err != nil {
 		return err
 	}

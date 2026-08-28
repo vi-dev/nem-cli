@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -22,8 +23,10 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2/content"
 	"oras.land/oras-go/v2/content/oci"
+	"oras.land/oras-go/v2/registry/remote/errcode"
 
 	"github.com/vi-dev/nem-cli/internal/catalog"
+	"github.com/vi-dev/nem-cli/internal/config"
 	"github.com/vi-dev/nem-cli/internal/home"
 	"github.com/vi-dev/nem-cli/internal/install"
 	"github.com/vi-dev/nem-cli/internal/ocix"
@@ -37,7 +40,7 @@ import (
 // for this whole test binary (see TestMain): use's cold auto-sync runs
 // ahead of every resolution, and most tests here never mean to reach a
 // real registry just because a default catalog happens to be unsynced.
-func stubSyncEmptyCatalog(ctx context.Context, ref, storePath string) error {
+func stubSyncEmptyCatalog(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 	dst, err := oci.New(storePath)
 	if err != nil {
 		return err
@@ -312,7 +315,7 @@ func otherPlatform(t *testing.T) spec.Platform {
 // each ref+storePath it's called with and syncs a fake catalog holding a
 // single "tool" package (restricted to plat) into storePath, bypassing any
 // real registry.
-func fakeOCICatalogSync(t *testing.T, calls *[]string, plat spec.Platform) func(ctx context.Context, ref, storePath string) error {
+func fakeOCICatalogSync(t *testing.T, calls *[]string, plat spec.Platform) func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 	t.Helper()
 	yaml := fmt.Sprintf(`
 schema: 2
@@ -325,7 +328,7 @@ install:
 versions:
   - v1.0.0
 `, plat)
-	return func(ctx context.Context, ref, storePath string) error {
+	return func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 		*calls = append(*calls, ref+"|"+storePath)
 		src, err := oci.New(t.TempDir())
 		if err != nil {
@@ -335,7 +338,7 @@ versions:
 			Name: "tool", Description: "a test tool", Latest: "v1.0.0",
 			YAML: []byte(yaml),
 		}}, "2")
-		_, err = ocix.SyncFrom(ctx, src, "v2", storePath)
+		_, err = ocix.SyncLocalCatalog(ctx, src, "v2", storePath, progress)
 		return err
 	}
 }
@@ -404,7 +407,7 @@ func TestUseColdAutoSyncFailureDoesNotAbortWhenToolResolvesElsewhere(t *testing.
 	}
 
 	orig := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 		return errors.New("network unreachable")
 	}
 	defer func() { syncCatalogStore = orig }()
@@ -439,7 +442,7 @@ func TestUseColdAutoSyncFailureSurfacesAtResolveWhenToolOnlyThere(t *testing.T) 
 
 	wantSyncErr := errors.New("network unreachable")
 	orig := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error { return wantSyncErr }
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error { return wantSyncErr }
 	defer func() { syncCatalogStore = orig }()
 
 	_, errb, err := runNem(t, nemHomeDir, "use", "cold:tool")
@@ -481,7 +484,7 @@ func TestUseColdAutoSyncFailureSkippedWhenToolResolvesInLaterCatalog(t *testing.
 	}
 
 	orig := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 		return errors.New("network unreachable")
 	}
 	defer func() { syncCatalogStore = orig }()
@@ -516,7 +519,7 @@ func TestUseUnqualifiedSurfacesNotSyncedWhenToolOnlyInUnsyncedCatalog(t *testing
 
 	wantSyncErr := errors.New("network unreachable")
 	orig := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error { return wantSyncErr }
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error { return wantSyncErr }
 	defer func() { syncCatalogStore = orig }()
 
 	_, errb, err := runNem(t, nemHomeDir, "use", "tool")
@@ -541,7 +544,7 @@ func TestUseIgnoresDisabledCatalog(t *testing.T) {
 	chdir(t, projDir)
 
 	h := testNemHome(nemHomeDir)
-	if err := catalog.SaveConfig(h, &catalog.Config{Catalogs: []catalog.Entry{
+	if err := config.SaveConfig(h, &config.Config{Catalogs: []config.CatalogEntry{
 		{Name: "off", Type: "oci", Ref: "ghcr.io/x/off:v2", Disabled: true},
 		{Name: "dir", Type: "dir", Path: catalogRoot},
 	}}); err != nil {
@@ -549,7 +552,7 @@ func TestUseIgnoresDisabledCatalog(t *testing.T) {
 	}
 	var coldSynced []string
 	orig := syncCatalogStore
-	syncCatalogStore = func(ctx context.Context, ref, storePath string) error {
+	syncCatalogStore = func(ctx context.Context, ref, storePath string, progress ocix.ProgressFunc) error {
 		coldSynced = append(coldSynced, ref)
 		return nil
 	}
@@ -577,6 +580,10 @@ func TestHintForTable(t *testing.T) {
 		{"package not found", &catalog.PackageNotFoundError{Name: "go", Catalogs: []string{"official"}}, "nem catalog update"},
 		{"unsupported platform", &resolve.UnsupportedPlatformError{Name: "go", Version: "v1"}, "none of nem's platforms"},
 		{"pin conflict", &resolve.PinConflictError{Name: "go", Pinned: "v1", Required: "v2"}, "nem use go@v2"},
+		{"registry 401 with host", &errcode.ErrorResponse{Method: "GET", URL: &url.URL{Host: "ghcr.io"}, StatusCode: http.StatusUnauthorized}, "docker login ghcr.io"},
+		{"registry 401 without host", &errcode.ErrorResponse{Method: "GET", URL: nil, StatusCode: http.StatusUnauthorized}, "docker login"},
+		{"registry 404 is not a login hint", &errcode.ErrorResponse{Method: "GET", URL: &url.URL{Host: "ghcr.io"}, StatusCode: http.StatusNotFound}, ""},
+		{"network error", &url.Error{Op: "Get", URL: "https://example.com", Err: errors.New("connection refused")}, "network"},
 		{"unrecognized", errors.New("boom"), ""},
 	}
 	for _, c := range cases {

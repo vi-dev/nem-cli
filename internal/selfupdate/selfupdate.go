@@ -19,6 +19,7 @@ import (
 
 	"github.com/vi-dev/nem-cli/internal/archive"
 	"github.com/vi-dev/nem-cli/internal/fetch"
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/report"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
@@ -120,7 +121,7 @@ func (u *Updater) fetchChecksums(ctx context.Context, version string) ([]byte, e
 func NewUpdater(token string) *Updater {
 	const repo = "vi-dev/nem-cli"
 	return &Updater{
-		Client:       &http.Client{},
+		Client:       netx.Client(),
 		APIBase:      "https://api.github.com",
 		DownloadBase: "https://github.com/" + repo + "/releases/download",
 		Repo:         repo,

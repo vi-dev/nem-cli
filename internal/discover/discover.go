@@ -5,8 +5,8 @@ package discover
 import (
 	"context"
 	"fmt"
-	"net/http"
 
+	"github.com/vi-dev/nem-cli/internal/netx"
 	"github.com/vi-dev/nem-cli/internal/spec"
 )
 
@@ -19,13 +19,13 @@ func List(ctx context.Context, pkg *spec.Package) ([]string, error) {
 	case d == nil:
 		return nil, fmt.Errorf("%s has no versionDiscovery", pkg.Name)
 	case d.GitHub != nil:
-		return githubVersions(ctx, http.DefaultClient, d.GitHub)
+		return githubVersions(ctx, netx.Client(), d.GitHub)
 	case d.GitLab != nil:
-		return gitlabVersions(ctx, http.DefaultClient, d.GitLab)
+		return gitlabVersions(ctx, netx.Client(), d.GitLab)
 	case d.Git != nil:
-		return gitVersions(ctx, http.DefaultClient, d.Git.URL, d.Git.Filter, d.Git.Prefix, d.Git.Suffix)
+		return gitVersions(ctx, netx.Client(), d.Git.URL, d.Git.Filter, d.Git.Prefix, d.Git.Suffix)
 	case d.HTTP != nil:
-		return httpVersions(ctx, http.DefaultClient, d.HTTP)
+		return httpVersions(ctx, netx.Client(), d.HTTP)
 	case d.OCI != "":
 		return ociTags(ctx, d.OCI)
 	}

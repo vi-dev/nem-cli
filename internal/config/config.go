@@ -1,7 +1,10 @@
-// Package catalog manages catalog configuration and package sources.
-package catalog
+// Package config holds nem's config.yaml document model: configured
+// catalogs and per-host connection settings, with strict load/save for
+// commands that read it and a lenient loader for the root command hook.
+package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,7 +20,9 @@ import (
 // OfficialRef is the catalog written into config.yaml on first run.
 const OfficialRef = "ghcr.io/vi-dev/nem-official-catalog:v2"
 
-type Entry struct {
+// CatalogEntry declares one configured catalog, listed under config.yaml's
+// catalogs: key.
+type CatalogEntry struct {
 	Name     string `yaml:"name"`
 	Type     string `yaml:"type"`
 	Ref      string `yaml:"ref,omitempty"`
@@ -25,8 +30,19 @@ type Entry struct {
 	Disabled bool   `yaml:"disabled,omitempty"`
 }
 
+// HostEntry declares one host's connection settings — trust today,
+// credentials planned — as listed under config.yaml's hosts: key. Exactly
+// one of CA, PlainHTTP, or Insecure applies.
+type HostEntry struct {
+	Host      string `yaml:"host"`
+	CA        string `yaml:"ca,omitempty"`
+	PlainHTTP bool   `yaml:"plainHTTP,omitempty"`
+	Insecure  bool   `yaml:"insecure,omitempty"`
+}
+
 type Config struct {
-	Catalogs []Entry `yaml:"catalogs"`
+	Catalogs []CatalogEntry `yaml:"catalogs"`
+	Hosts    []HostEntry    `yaml:"hosts,omitempty"`
 }
 
 // OpenConfig loads config.yaml, writing the default (official) config first
@@ -34,7 +50,7 @@ type Config struct {
 func OpenConfig(h home.Home) (*Config, error) {
 	data, err := os.ReadFile(h.Config())
 	if os.IsNotExist(err) {
-		cfg := &Config{Catalogs: []Entry{{Name: "official", Type: "oci", Ref: OfficialRef}}}
+		cfg := &Config{Catalogs: []CatalogEntry{{Name: "official", Type: "oci", Ref: OfficialRef}}}
 		if err := SaveConfig(h, cfg); err != nil {
 			return nil, err
 		}
@@ -100,13 +116,76 @@ func (c *Config) validate() error {
 			return fmt.Errorf("catalog %s: unknown type %q", e.Name, e.Type)
 		}
 	}
+	for i, r := range c.Hosts {
+		if err := validateHostEntry(r); err != nil {
+			return fmt.Errorf("hosts[%d]: %w", i, err)
+		}
+	}
 	return nil
+}
+
+// validateHostEntry: a host repeated across entries is not an error here
+// — LoadHostSettingsLenient resolves repeats by last-entry-wins.
+func validateHostEntry(r HostEntry) error {
+	if r.Host == "" {
+		return errors.New("host is required")
+	}
+	n := 0
+	if r.CA != "" {
+		n++
+	}
+	if r.PlainHTTP {
+		n++
+	}
+	if r.Insecure {
+		n++
+	}
+	if n != 1 {
+		return errors.New("exactly one of ca, plainHTTP, or insecure is required")
+	}
+	if r.CA != "" && !filepath.IsAbs(r.CA) {
+		return errors.New("ca must be an absolute path")
+	}
+	return nil
+}
+
+// LoadHostSettingsLenient reads config.yaml's hosts: list for the root
+// command hook, without ever failing the command: unknown top-level keys
+// are ignored, each invalid entry is dropped with its own warning, an
+// unreadable or unparsable file yields zero entries and one warning, and
+// a missing file (the normal pre-first-run state) yields neither.
+func LoadHostSettingsLenient(h home.Home) (map[string]HostEntry, []string) {
+	data, err := os.ReadFile(h.Config())
+	switch {
+	case os.IsNotExist(err):
+		return nil, nil
+	case err != nil:
+		return nil, []string{fmt.Sprintf("host settings: read %s: %v (no host settings applied)", h.Config(), err)}
+	}
+
+	var raw struct {
+		Hosts []HostEntry `yaml:"hosts"`
+	}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, []string{fmt.Sprintf("host settings: parse %s: %v (no host settings applied)", h.Config(), err)}
+	}
+
+	entries := make(map[string]HostEntry, len(raw.Hosts))
+	var warnings []string
+	for i, r := range raw.Hosts {
+		if err := validateHostEntry(r); err != nil {
+			warnings = append(warnings, fmt.Sprintf("host settings: hosts[%d] (host %q): %v (entry ignored)", i, r.Host, err))
+			continue
+		}
+		entries[r.Host] = r
+	}
+	return entries, warnings
 }
 
 // Find returns the entry with the given name, or nil if not found.
 // The returned pointer is valid only until the next mutation of the config (append, Reorder);
 // do not hold it across mutations.
-func (c *Config) Find(name string) *Entry {
+func (c *Config) Find(name string) *CatalogEntry {
 	for i := range c.Catalogs {
 		if c.Catalogs[i].Name == name {
 			return &c.Catalogs[i]
@@ -122,7 +201,7 @@ func (c *Config) Reorder(names []string) error {
 	if len(names) != len(c.Catalogs) {
 		return fmt.Errorf("reorder must list every catalog exactly once (%d configured, %d given)", len(c.Catalogs), len(names))
 	}
-	out := make([]Entry, 0, len(names))
+	out := make([]CatalogEntry, 0, len(names))
 	used := map[string]bool{}
 	for _, n := range names {
 		if used[n] {
