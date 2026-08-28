@@ -1,6 +1,6 @@
 module github.com/vi-dev/nem-cli
 
-go 1.26.7
+go 1.27.0
 
 require (
 	github.com/goccy/go-yaml v1.19.2
