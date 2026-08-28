@@ -114,4 +114,66 @@ func TestNormalizeMacho(t *testing.T) {
 	if len(fixes) != 0 {
 		t.Fatalf("normalization not idempotent, still planned: %+v", fixes)
 	}
+
+	// main returns demo()'s 42 — dyld found the lib and the call ran
+	cmd := exec.Command(filepath.Join(out, "bin", "demo"))
+	if b, err := cmd.CombinedOutput(); cmd.ProcessState.ExitCode() != 42 {
+		t.Fatalf("normalized binary does not run: %v\n%s", err, b)
+	}
+}
+
+// TestNormalizeMachoSelfRpath covers builds that already link with @rpath
+// install names (curl does): normalization must add the rpath entries that
+// let each Mach-O reach the libs shipped in its own tree — bin/ to ../lib,
+// and a dylib to a sibling in the same dir.
+func TestNormalizeMachoSelfRpath(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Mach-O normalization is darwin-only")
+	}
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+
+	out := t.TempDir()
+	src := t.TempDir()
+	writeTree(t, src, "demo.c", "int demo(void) { return 42; }\n")
+	writeTree(t, src, "user.c", "int demo(void); int user(void) { return demo(); }\n")
+	writeTree(t, src, "main.c", "int user(void); int main(void) { return user() - 42; }\n")
+	if err := os.MkdirAll(filepath.Join(out, "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(out, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(name string, args ...string) {
+		t.Helper()
+		if b, err := exec.Command(name, args...).CombinedOutput(); err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, args, err, b)
+		}
+	}
+	libDir := filepath.Join(out, "lib")
+	run("clang", "-dynamiclib", "-install_name", "@rpath/libdemo.1.dylib",
+		"-o", filepath.Join(libDir, "libdemo.1.dylib"), filepath.Join(src, "demo.c"))
+	run("clang", "-dynamiclib", "-install_name", "@rpath/libuser.1.dylib",
+		"-o", filepath.Join(libDir, "libuser.1.dylib"), filepath.Join(src, "user.c"),
+		"-L", libDir, "-ldemo.1")
+	run("clang", "-o", filepath.Join(out, "bin", "demo"), filepath.Join(src, "main.c"),
+		"-L", libDir, "-luser.1")
+
+	if err := normalizeOutput(out); err != nil {
+		t.Fatalf("normalizeOutput: %v", err)
+	}
+
+	if b, err := exec.Command(filepath.Join(out, "bin", "demo")).CombinedOutput(); err != nil {
+		t.Fatalf("normalized binary does not run: %v\n%s", err, b)
+	}
+
+	// second run is a no-op — the added rpaths must not be planned again
+	fixes, err := planMachoFixes(out)
+	if err != nil {
+		t.Fatalf("re-plan: %v", err)
+	}
+	if len(fixes) != 0 {
+		t.Fatalf("normalization not idempotent, still planned: %+v", fixes)
+	}
 }

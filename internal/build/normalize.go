@@ -106,34 +106,40 @@ func relocatePCLine(line, libSeg string) string {
 	return line
 }
 
-// machoFix is the planned rewrite for one Mach-O file: a new dylib id
-// and/or reference changes, applied with install_name_tool and re-signed.
+// machoFix is the planned rewrite for one Mach-O file: a new dylib id,
+// reference changes and/or added rpath entries, applied with
+// install_name_tool and re-signed.
 type machoFix struct {
 	path    string
 	id      string      // new LC_ID_DYLIB; "" keeps the current id
 	changes [][2]string // old reference -> new reference
+	rpaths  []string    // LC_RPATH entries to add
 }
 
 // planMachoFixes walks outDir and plans the @rpath rewrites: a dylib whose
 // id is an absolute non-system path gets id @rpath/<base>, and any Mach-O
 // referencing an absolute non-system path whose basename is shipped in
 // this same tree gets that reference rewritten to @rpath/<base>. System
-// libraries and references to other packages are never touched.
+// libraries and references to other packages are never touched. Every
+// @rpath reference to a shipped lib — rewritten here or linked that way by
+// the build — also gets an @loader_path rpath entry back to the lib's dir,
+// unless one is already present.
 func planMachoFixes(outDir string) ([]machoFix, error) {
 	type machoInfo struct {
-		path  string
-		dylib bool
-		id    string
-		refs  []string
+		path   string
+		dylib  bool
+		id     string
+		refs   []string
+		rpaths []string
 	}
 	var files []machoInfo
-	shipped := map[string]bool{}
+	shipped := map[string]string{} // dylib basename -> dir holding it
 	err := filepath.WalkDir(outDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.Type()&fs.ModeSymlink != 0 && strings.Contains(d.Name(), ".dylib") {
-			shipped[d.Name()] = true
+			shipped[d.Name()] = filepath.Dir(path)
 		}
 		if !d.Type().IsRegular() {
 			return nil
@@ -148,10 +154,15 @@ func planMachoFixes(outDir string) ([]machoFix, error) {
 			if info.id, err = dylibID(f); err != nil {
 				return fmt.Errorf("read dylib id of %s: %w", path, err)
 			}
-			shipped[filepath.Base(path)] = true
+			shipped[filepath.Base(path)] = filepath.Dir(path)
 		}
 		if info.refs, err = f.ImportedLibraries(); err != nil {
 			return fmt.Errorf("read imports of %s: %w", path, err)
+		}
+		for _, l := range f.Loads {
+			if rp, ok := l.(*macho.Rpath); ok {
+				info.rpaths = append(info.rpaths, rp.Path)
+			}
 		}
 		files = append(files, info)
 		return nil
@@ -166,12 +177,40 @@ func planMachoFixes(outDir string) ([]machoFix, error) {
 		if mf.dylib && strings.HasPrefix(mf.id, "/") && !systemLib(mf.id) {
 			fix.id = "@rpath/" + filepath.Base(mf.id)
 		}
+		var inTree []string // basenames this file will reference via @rpath
 		for _, ref := range mf.refs {
-			if strings.HasPrefix(ref, "/") && !systemLib(ref) && shipped[filepath.Base(ref)] {
-				fix.changes = append(fix.changes, [2]string{ref, "@rpath/" + filepath.Base(ref)})
+			base := filepath.Base(ref)
+			switch {
+			case strings.HasPrefix(ref, "@rpath/"):
+				inTree = append(inTree, base)
+			case strings.HasPrefix(ref, "/") && !systemLib(ref) && shipped[base] != "":
+				fix.changes = append(fix.changes, [2]string{ref, "@rpath/" + base})
+				inTree = append(inTree, base)
 			}
 		}
-		if fix.id != "" || len(fix.changes) > 0 {
+		have := map[string]bool{}
+		for _, rp := range mf.rpaths {
+			have[rp] = true
+		}
+		for _, base := range inTree {
+			dir, ok := shipped[base]
+			if !ok {
+				continue
+			}
+			rel, err := filepath.Rel(filepath.Dir(mf.path), dir)
+			if err != nil {
+				return nil, fmt.Errorf("relate %s to %s: %w", mf.path, dir, err)
+			}
+			entry := "@loader_path"
+			if rel != "." {
+				entry += "/" + rel
+			}
+			if !have[entry] {
+				have[entry] = true
+				fix.rpaths = append(fix.rpaths, entry)
+			}
+		}
+		if fix.id != "" || len(fix.changes) > 0 || len(fix.rpaths) > 0 {
 			fixes = append(fixes, fix)
 		}
 	}
@@ -217,6 +256,9 @@ func applyMachoFixes(fixes []machoFix) error {
 		}
 		for _, c := range fix.changes {
 			args = append(args, "-change", c[0], c[1])
+		}
+		for _, rp := range fix.rpaths {
+			args = append(args, "-add_rpath", rp)
 		}
 		args = append(args, fix.path)
 		if out, err := exec.Command("install_name_tool", args...).CombinedOutput(); err != nil {
