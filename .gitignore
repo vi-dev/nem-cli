@@ -1,3 +1,6 @@
 .worktrees/
 dist/
 coverage.out
+website/public/
+website/resources/
+website/.hugo_build.lock

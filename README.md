@@ -15,6 +15,10 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/vi-dev/nem-cli?color=blue" alt="License: MPL-2.0"></a>
 </p>
 
+<p align="center">
+  <a href="https://vi-dev.org/nem-cli/"><b>Documentation</b></a>
+</p>
+
 > [!IMPORTANT]
 > `nem` is in active development and is provided **as is**, without warranty of
 > any kind. Expect breaking changes and rough edges — feedback and
