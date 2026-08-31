@@ -92,9 +92,10 @@ func TestRunPackagesFanOutInParallel(t *testing.T) {
 	}
 
 	serialFloor := n * delay
-	// A generous ceiling above the ideal n/limit*delay: real scheduling
-	// jitter shouldn't fail this, only actual serialization should.
-	parallelCeiling := time.Duration(n/limit+2) * delay
+	idealWaves := (n + limit - 1) / limit
+	// Three extra delays of headroom: each wave's sleep oversleeps a few
+	// ms on a busy CI runner, and only real serialization should fail this.
+	parallelCeiling := time.Duration(idealWaves+3) * delay
 	if elapsed >= serialFloor {
 		t.Fatalf("elapsed %s is not faster than the fully-serialized floor %s: no parallelism", elapsed, serialFloor)
 	}
