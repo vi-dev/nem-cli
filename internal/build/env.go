@@ -86,6 +86,11 @@ func ComposeEnv(base []string, deps []ResolvedDep, ectx EnvContext) []string {
 		ldflags = append(ldflags, "-Wl,--enable-new-dtags")
 		cgoLdflags = append(cgoLdflags, "-Wl,--enable-new-dtags")
 	}
+	if runtime.GOOS == "darwin" {
+		const headerpad = "-Wl,-headerpad_max_install_names"
+		ldflags = append(ldflags, headerpad)
+		cgoLdflags = append(cgoLdflags, headerpad)
+	}
 
 	prependPathVar(vars, "PATH", pathDirs)
 	appendVar(vars, "CPPFLAGS", cppflags, " ")

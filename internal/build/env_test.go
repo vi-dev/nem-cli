@@ -101,6 +101,33 @@ func TestComposeEnv(t *testing.T) {
 			t.Errorf("%s = %q, want %q", k, m[k], want)
 		}
 	}
+	headerpad := "-Wl,-headerpad_max_install_names"
+	if runtime.GOOS == "darwin" && !strings.Contains(m["LDFLAGS"], headerpad) {
+		t.Fatalf("darwin LDFLAGS must carry headerpad: %q", m["LDFLAGS"])
+	}
+	if runtime.GOOS == "darwin" && !strings.Contains(m["CGO_LDFLAGS"], headerpad) {
+		t.Fatalf("darwin CGO_LDFLAGS must carry headerpad: %q", m["CGO_LDFLAGS"])
+	}
+	if runtime.GOOS != "darwin" && strings.Contains(m["LDFLAGS"], "headerpad") {
+		t.Fatalf("headerpad is a darwin-only flag: %q", m["LDFLAGS"])
+	}
+}
+
+// TestComposeEnvHeaderpadWithoutDeps covers packages with no link deps at
+// all: normalization still rewrites their own dylib ids and rpaths, so on
+// darwin the headerpad flag must be present even when nothing else is.
+func TestComposeEnvHeaderpadWithoutDeps(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("darwin-only linker flag")
+	}
+	env := ComposeEnv(nil, nil, EnvContext{
+		Version: "v1", Platform: spec.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH},
+		Prefix: "/nh/packages/tool/v1",
+	})
+	m := envMap(env)
+	if !strings.Contains(m["LDFLAGS"], "-Wl,-headerpad_max_install_names") {
+		t.Fatalf("LDFLAGS = %q, want headerpad flag", m["LDFLAGS"])
+	}
 }
 
 func TestComposeEnvOmitsEmptyStagingAndOutput(t *testing.T) {
