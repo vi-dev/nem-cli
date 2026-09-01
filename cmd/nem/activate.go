@@ -21,9 +21,10 @@ var stdoutIsTTY = func() bool {
 func newActivateCmd() *cobra.Command {
 	var printOnly bool
 	cmd := &cobra.Command{
-		Use:   "activate [zsh|bash]",
-		Short: "Activate nem for the current shell",
-		Args:  cobra.MaximumNArgs(1),
+		Use:       "activate [zsh|bash]",
+		Short:     "Activate nem for the current shell",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"bash", "zsh"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runActivate(args, printOnly)
 		},
@@ -34,9 +35,10 @@ func newActivateCmd() *cobra.Command {
 
 func newDeactivateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "deactivate [zsh|bash]",
-		Short: "Deactivate nem for the current shell",
-		Args:  cobra.MaximumNArgs(1),
+		Use:       "deactivate [zsh|bash]",
+		Short:     "Deactivate nem for the current shell",
+		Args:      cobra.MaximumNArgs(1),
+		ValidArgs: []string{"bash", "zsh"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runDeactivate(args)
 		},

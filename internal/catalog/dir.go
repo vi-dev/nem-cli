@@ -14,6 +14,7 @@ import (
 type Dir struct{ root string }
 
 var _ Source = (*Dir)(nil)
+var _ NameLister = (*Dir)(nil)
 
 func NewDir(root string) *Dir { return &Dir{root: root} }
 
@@ -50,6 +51,14 @@ func (d *Dir) Versions(ctx context.Context, name string) ([]string, error) {
 	return versionsOf(pkg), nil
 }
 
+func (d *Dir) isPackage(e os.DirEntry) bool {
+	if !e.IsDir() || !spec.NameRE.MatchString(e.Name()) {
+		return false
+	}
+	_, err := os.Stat(d.pkgPath(e.Name()))
+	return err == nil
+}
+
 func (d *Dir) Summaries(ctx context.Context) ([]Summary, error) {
 	entries, err := os.ReadDir(filepath.Join(d.root, "pkgs"))
 	if os.IsNotExist(err) {
@@ -60,12 +69,12 @@ func (d *Dir) Summaries(ctx context.Context) ([]Summary, error) {
 	}
 	var out []Summary
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !d.isPackage(e) {
 			continue
 		}
 		pkg, _, err := d.Load(ctx, e.Name())
 		if err != nil {
-			return nil, err
+			continue
 		}
 		latest := ""
 		if len(pkg.Versions) > 0 {
@@ -74,5 +83,25 @@ func (d *Dir) Summaries(ctx context.Context) ([]Summary, error) {
 		out = append(out, Summary{Name: pkg.Name, Description: pkg.Description, Latest: latest})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// PackageNames lists package directory names without parsing manifests, so
+// completion stays fast on large catalogs.
+func (d *Dir) PackageNames(_ context.Context) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(d.root, "pkgs"))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read catalog dir %s: %w", d.root, err)
+	}
+	var out []string
+	for _, e := range entries {
+		if !d.isPackage(e) {
+			continue
+		}
+		out = append(out, e.Name())
+	}
 	return out, nil
 }

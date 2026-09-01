@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -84,23 +85,60 @@ func (s *Store) CopyTo(ctx context.Context, dst oras.Target, dstRef string, prog
 	return CopyIndexClosureWithProgress(ctx, s.target, s.tag, dst, dstRef, progress)
 }
 
-// OpenLocalStore opens a Store at storePath. ErrNotSynced reports a store that was never synced.
-func OpenLocalStore(ctx context.Context, storePath string) (*Store, error) {
-	if _, err := os.Stat(storePath); os.IsNotExist(err) {
+// read-only by type: a localTarget must never satisfy writable oras.Target
+type localTarget struct {
+	*oci.ReadOnlyStorage
+	tags map[string]ocispec.Descriptor
+}
+
+var _ oras.ReadOnlyTarget = (*localTarget)(nil)
+
+func (t *localTarget) Resolve(_ context.Context, ref string) (ocispec.Descriptor, error) {
+	if d, ok := t.tags[ref]; ok {
+		return d, nil
+	}
+	return ocispec.Descriptor{}, errdef.ErrNotFound
+}
+
+// openLocalTarget opens an OCI layout store at storePath as a read-only localTarget.
+// oci.New is not used deliberately to avoid writing to filesystem or
+// reading every manifest unnecessarily. It returns ErrNotSynced if the store is not synced.
+func openLocalTarget(storePath string) (*localTarget, error) {
+	data, err := os.ReadFile(filepath.Join(storePath, ocispec.ImageIndexFile))
+	if os.IsNotExist(err) {
 		return nil, ErrNotSynced
 	}
-	store, err := oci.New(storePath)
 	if err != nil {
 		return nil, fmt.Errorf("open catalog store %s: %w", storePath, err)
 	}
-	idx, desc, err := FetchCatalogIndex(ctx, store, LocalTag)
+	var layout ocispec.Index
+	if err := json.Unmarshal(data, &layout); err != nil {
+		return nil, fmt.Errorf("open catalog store %s: parse index.json: %w", storePath, err)
+	}
+	storage := oci.NewStorageFromFS(os.DirFS(storePath))
+	tags := make(map[string]ocispec.Descriptor)
+	for _, m := range layout.Manifests {
+		if ref := m.Annotations[ocispec.AnnotationRefName]; ref != "" {
+			tags[ref] = m
+		}
+	}
+	return &localTarget{ReadOnlyStorage: storage, tags: tags}, nil
+}
+
+// OpenLocalStore opens a Store at storePath. ErrNotSynced reports a store that was never synced.
+func OpenLocalStore(ctx context.Context, storePath string) (*Store, error) {
+	target, err := openLocalTarget(storePath)
+	if err != nil {
+		return nil, err
+	}
+	idx, desc, err := FetchCatalogIndex(ctx, target, LocalTag)
 	if err != nil {
 		if errors.Is(err, errdef.ErrNotFound) {
 			return nil, ErrNotSynced
 		}
 		return nil, err
 	}
-	return newStore(store, LocalTag, idx, desc.Digest.String()), nil
+	return newStore(target, LocalTag, idx, desc.Digest.String()), nil
 }
 
 func OpenStore(ctx context.Context, src oras.ReadOnlyTarget, ref string) (*Store, error) {

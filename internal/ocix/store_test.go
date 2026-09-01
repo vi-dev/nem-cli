@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -321,5 +322,87 @@ func TestStageIndexClosureReportsProgress(t *testing.T) {
 	wantTotal := int64(n + 1)
 	if last.done != wantTotal || last.total != wantTotal {
 		t.Fatalf("final call = %+v, want done=total=%d", last, wantTotal)
+	}
+}
+
+// completion runs OpenLocalStore on every <TAB>, so a broken store dir
+// must stay untouched
+func TestOpenLocalStoreNeverWritesToBrokenStore(t *testing.T) {
+	storePath := t.TempDir()
+	if err := os.WriteFile(filepath.Join(storePath, "stray"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := OpenLocalStore(context.Background(), storePath)
+	if err != ErrNotSynced {
+		t.Fatalf("want ErrNotSynced, got %v", err)
+	}
+
+	entries, err := os.ReadDir(storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "stray" {
+		names := make([]string, len(entries))
+		for i, e := range entries {
+			names[i] = e.Name()
+		}
+		t.Fatalf("OpenLocalStore wrote into the store dir: %v", names)
+	}
+}
+
+func TestOpenLocalStoreServesSyncedCatalog(t *testing.T) {
+	ctx := context.Background()
+	src, err := oci.New(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries := fakeCatalogEntries(3)
+	PushFakeCatalogForTest(t, src, entries, SchemaVersion)
+	storePath := filepath.Join(t.TempDir(), "store")
+	synced, err := SyncLocalCatalog(ctx, src, "v2", storePath, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenLocalStore(ctx, storePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Digest() != synced.Digest() {
+		t.Fatalf("digest %s != synced %s", s.Digest(), synced.Digest())
+	}
+	pkgs := s.Packages()
+	if len(pkgs) != len(entries) {
+		t.Fatalf("got %d packages, want %d", len(pkgs), len(entries))
+	}
+	for _, e := range entries {
+		data, _, err := s.PkgBytes(ctx, e.Name)
+		if err != nil {
+			t.Fatalf("PkgBytes(%s): %v", e.Name, err)
+		}
+		if string(data) != string(e.YAML) {
+			t.Fatalf("PkgBytes(%s) = %q, want %q", e.Name, data, e.YAML)
+		}
+	}
+}
+
+// completion pays this open on every <TAB>; it must stay flat in catalog size
+func BenchmarkOpenLocalStore(b *testing.B) {
+	ctx := context.Background()
+	src, err := oci.New(b.TempDir())
+	if err != nil {
+		b.Fatal(err)
+	}
+	PushFakeCatalogForTest(b, src, fakeCatalogEntries(300), SchemaVersion)
+	storePath := filepath.Join(b.TempDir(), "store")
+	if _, err := SyncLocalCatalog(ctx, src, "v2", storePath, nil); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := OpenLocalStore(ctx, storePath); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

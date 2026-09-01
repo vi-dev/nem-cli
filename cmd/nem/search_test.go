@@ -220,7 +220,8 @@ func TestSearchNoMatchesExitsZero(t *testing.T) {
 	}
 }
 
-func TestSearchAbortsOnNonNotSyncedCatalogError(t *testing.T) {
+// an invalid package stays out of listings; only loading it directly errors
+func TestSearchOmitsInvalidCatalogEntry(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	root := t.TempDir()
 	badDir := filepath.Join(root, "pkgs", "bad")
@@ -235,8 +236,11 @@ func TestSearchAbortsOnNonNotSyncedCatalogError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err := runNem(t, nemHomeDir, "search", "bad")
-	if err == nil {
-		t.Fatal("want error for a broken catalog entry")
+	out, errb, err := runNem(t, nemHomeDir, "search", "bad")
+	if err != nil {
+		t.Fatalf("search must not abort on a broken catalog entry: %v\n%s", err, errb)
+	}
+	if strings.Contains(out, "broken") {
+		t.Fatalf("broken entry must not be listed:\n%s", out)
 	}
 }

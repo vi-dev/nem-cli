@@ -65,6 +65,7 @@ func newRoot() *cobra.Command {
 	pf.BoolVarP(&flagQuiet, "quiet", "q", false, "suppress narration output")
 	pf.BoolVar(&flagVerbose, "verbose", false, "show debug output")
 	pf.StringVar(&flagColor, "color", "auto", "colorize output: auto, always, or never")
+	_ = root.RegisterFlagCompletionFunc("color", cobra.FixedCompletions([]string{"auto", "always", "never"}, cobra.ShellCompDirectiveNoFileComp))
 
 	// Cobra gotchas for future commands:
 	//  - required-flag and flag-group validation runs AFTER PersistentPreRunE,

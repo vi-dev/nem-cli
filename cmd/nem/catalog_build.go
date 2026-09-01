@@ -17,9 +17,10 @@ func newCatalogBuildCmd() *cobra.Command {
 	var version, output, sourceSha, push string
 	var dryRun, force, noTest bool
 	cmd := &cobra.Command{
-		Use:   "build <pkg.yaml>",
-		Short: "Build a source package's recipe on the host platform",
-		Args:  cobra.ExactArgs(1),
+		Use:               "build <pkg.yaml>",
+		Short:             "Build a source package's recipe on the host platform",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: firstArgOnly(completeYAMLFiles),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := readFile(args[0])
 			if err != nil {

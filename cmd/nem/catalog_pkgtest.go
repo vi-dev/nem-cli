@@ -19,9 +19,10 @@ import (
 func newCatalogTestCmd() *cobra.Command {
 	var version string
 	cmd := &cobra.Command{
-		Use:   "test <pkg.yaml>",
-		Short: "Install a package and run its declared test steps",
-		Args:  cobra.ExactArgs(1),
+		Use:               "test <pkg.yaml>",
+		Short:             "Install a package and run its declared test steps",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: firstArgOnly(completeYAMLFiles),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, err := readFile(args[0])
 			if err != nil {

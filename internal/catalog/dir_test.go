@@ -86,7 +86,9 @@ func TestDirInvalidPkgErrors(t *testing.T) {
 	if _, _, err := NewDir(root).Load(context.Background(), "bad"); err == nil {
 		t.Fatal("invalid pkg.yaml must error")
 	}
-	if _, err := NewDir(root).Summaries(context.Background()); err == nil {
-		t.Fatal("Summaries over invalid pkg must error")
+	// listings stay silent about the same package Load rejects
+	sums, err := NewDir(root).Summaries(context.Background())
+	if err != nil || len(sums) != 1 || sums[0].Name != "ok" {
+		t.Fatalf("summaries: %+v, %v", sums, err)
 	}
 }

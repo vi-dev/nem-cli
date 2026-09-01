@@ -25,6 +25,9 @@ func newEnvCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&shellName, "shell", "", "shell dialect to render for: bash, zsh, or fish (default: $SHELL)")
+	// fish is accepted by envDialect but EnvScript rejects it; offer only
+	// values that succeed
+	_ = cmd.RegisterFlagCompletionFunc("shell", cobra.FixedCompletions([]string{"bash", "zsh"}, cobra.ShellCompDirectiveNoFileComp))
 	return cmd
 }
 

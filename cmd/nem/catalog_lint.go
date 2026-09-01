@@ -8,9 +8,10 @@ import (
 
 func newCatalogLintCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "lint [dir]",
-		Short: "Validate every package manifest in a catalog",
-		Args:  cobra.MaximumNArgs(1),
+		Use:               "lint [dir]",
+		Short:             "Validate every package manifest in a catalog",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: firstArgOnly(completeDirsOnly),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir := "."
 			if len(args) == 1 {

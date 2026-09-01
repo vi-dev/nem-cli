@@ -12,9 +12,10 @@ import (
 
 func newInfoCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "info [<catalog>:]<pkg>",
-		Short: "Show a package's details and available versions",
-		Args:  cobra.ExactArgs(1),
+		Use:               "info [<catalog>:]<pkg>",
+		Short:             "Show a package's details and available versions",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: firstArgOnly(completeAvailablePackages),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runInfo(cmd, args[0])
 		},

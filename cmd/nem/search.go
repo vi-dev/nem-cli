@@ -14,11 +14,12 @@ import (
 
 func newSearchCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "search [query]",
-		Aliases: []string{"find"},
-		Short:   "Search catalogs for packages",
-		Long:    "Search catalogs for packages by name or description.\nWithout a query, list every available package.",
-		Args:    cobra.MaximumNArgs(1),
+		Use:               "search [query]",
+		Aliases:           []string{"find"},
+		Short:             "Search catalogs for packages",
+		Long:              "Search catalogs for packages by name or description.\nWithout a query, list every available package.",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: firstArgOnly(completeSearchQuery),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			query := ""
 			if len(args) == 1 {

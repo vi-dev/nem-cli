@@ -19,6 +19,13 @@ type Source interface {
 	Load(ctx context.Context, name string) (*spec.Package, string, error)
 }
 
+// NameLister is an optional Source capability: listing package names
+// without parsing manifests. Completion prefers it over Summaries when a
+// source implements it.
+type NameLister interface {
+	PackageNames(ctx context.Context) ([]string, error)
+}
+
 // Named pairs a Source with its configured catalog name.
 type Named struct {
 	Name   string

@@ -50,7 +50,7 @@ type Config struct {
 func OpenConfig(h home.Home) (*Config, error) {
 	data, err := os.ReadFile(h.Config())
 	if os.IsNotExist(err) {
-		cfg := &Config{Catalogs: []CatalogEntry{{Name: "official", Type: "oci", Ref: OfficialRef}}}
+		cfg := defaultConfig()
 		if err := SaveConfig(h, cfg); err != nil {
 			return nil, err
 		}
@@ -59,6 +59,29 @@ func OpenConfig(h home.Home) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", h.Config(), err)
 	}
+	return parseConfig(h, data)
+}
+
+// OpenConfigReadOnly loads config.yaml without ever writing: a missing
+// file yields the same default config OpenConfig would create, in memory
+// only. Completion code must use this — a bare <TAB> must not create
+// files.
+func OpenConfigReadOnly(h home.Home) (*Config, error) {
+	data, err := os.ReadFile(h.Config())
+	if os.IsNotExist(err) {
+		return defaultConfig(), nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", h.Config(), err)
+	}
+	return parseConfig(h, data)
+}
+
+func defaultConfig() *Config {
+	return &Config{Catalogs: []CatalogEntry{{Name: "official", Type: "oci", Ref: OfficialRef}}}
+}
+
+func parseConfig(h home.Home, data []byte) (*Config, error) {
 	var cfg Config
 	if err := yaml.UnmarshalWithOptions(data, &cfg, yaml.Strict()); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", h.Config(), err)

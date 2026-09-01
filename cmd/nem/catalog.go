@@ -105,6 +105,7 @@ func newCatalogAddCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&typeFlag, "type", "", "catalog type: oci or dir (default: auto-detect)")
+	_ = cmd.RegisterFlagCompletionFunc("type", cobra.FixedCompletions([]string{"oci", "dir"}, cobra.ShellCompDirectiveNoFileComp))
 	return cmd
 }
 
@@ -139,10 +140,11 @@ func newCatalogListCmd() *cobra.Command {
 
 func newCatalogRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "remove <name>",
-		Aliases: []string{"rm"},
-		Short:   "Remove a catalog",
-		Args:    cobra.ExactArgs(1),
+		Use:               "remove <name>",
+		Aliases:           []string{"rm"},
+		Short:             "Remove a catalog",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: firstArgOnly(completeCatalogNames(anyCatalog)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			release, err := fsx.Lock(nemHome.LockFile())
@@ -180,10 +182,11 @@ func newCatalogRemoveCmd() *cobra.Command {
 
 func newCatalogUpdateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "update [name]",
-		Aliases: []string{"up"},
-		Short:   "Sync oci catalogs from their remote",
-		Args:    cobra.MaximumNArgs(1),
+		Use:               "update [name]",
+		Aliases:           []string{"up"},
+		Short:             "Sync oci catalogs from their remote",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: firstArgOnly(completeCatalogNames(func(e config.CatalogEntry) bool { return e.Type == "oci" && !e.Disabled })),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			release, err := fsx.Lock(nemHome.LockFile())
 			if err != nil {
@@ -245,9 +248,10 @@ func syncOne(ctx context.Context, e config.CatalogEntry) error {
 
 func newCatalogReorderCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "reorder <name>...",
-		Short: "Reorder catalog precedence",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "reorder <name>...",
+		Short:             "Reorder catalog precedence",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCatalogNames(anyCatalog),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			release, err := fsx.Lock(nemHome.LockFile())
 			if err != nil {
@@ -272,19 +276,21 @@ func newCatalogReorderCmd() *cobra.Command {
 
 func newCatalogDisableCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "disable <name>...",
-		Short: "Disable configured catalogs",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, true) },
+		Use:               "disable <name>...",
+		Short:             "Disable configured catalogs",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCatalogNames(func(e config.CatalogEntry) bool { return !e.Disabled }),
+		RunE:              func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, true) },
 	}
 }
 
 func newCatalogEnableCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "enable <name>...",
-		Short: "Enable configured catalogs",
-		Args:  cobra.MinimumNArgs(1),
-		RunE:  func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, false) },
+		Use:               "enable <name>...",
+		Short:             "Enable configured catalogs",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeCatalogNames(func(e config.CatalogEntry) bool { return e.Disabled }),
+		RunE:              func(cmd *cobra.Command, args []string) error { return setCatalogsDisabled(args, false) },
 	}
 }
 

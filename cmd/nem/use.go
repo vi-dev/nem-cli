@@ -38,9 +38,10 @@ var syncCatalogStore = func(ctx context.Context, ref, storePath string, progress
 func newUseCmd() *cobra.Command {
 	var global bool
 	cmd := &cobra.Command{
-		Use:   "use [<catalog>:]<pkg>[@<version>]...",
-		Short: "Declare and install tools",
-		Args:  cobra.MinimumNArgs(1),
+		Use:               "use [<catalog>:]<pkg>[@<version>]...",
+		Short:             "Declare and install tools",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeUseArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUse(cmd, args, global)
 		},
@@ -55,6 +56,9 @@ func newUnuseCmd() *cobra.Command {
 		Use:   "unuse <pkg>...",
 		Short: "Remove declared tools",
 		Args:  cobra.MinimumNArgs(1),
+		ValidArgsFunction: func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+			return completeDeclaredPackages(global, args, toComplete)
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runUnuse(cmd, args, global)
 		},
