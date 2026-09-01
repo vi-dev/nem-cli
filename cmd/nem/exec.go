@@ -26,9 +26,10 @@ func (e *ExitError) Error() string { return fmt.Sprintf("exit status %d", e.Code
 
 func newExecCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "exec [-- <cmd> [args...]]",
-		Short: "Run a command in the composed environment",
-		Args:  cobra.MinimumNArgs(1),
+		Use:     "exec [-- <cmd> [args...]]",
+		Aliases: []string{"x"},
+		Short:   "Run a command in the composed environment",
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runExec(cmd, args)
 		},

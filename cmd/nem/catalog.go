@@ -36,8 +36,9 @@ const (
 
 func newCatalogCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "catalog",
-		Short: "Manage catalogs",
+		Use:     "catalog",
+		Aliases: []string{"cat"},
+		Short:   "Manage catalogs",
 	}
 	cmd.AddGroup(
 		&cobra.Group{ID: catalogGroupConsumption, Title: "Catalog consumption:"},
@@ -109,9 +110,10 @@ func newCatalogAddCmd() *cobra.Command {
 
 func newCatalogListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list",
-		Short: "List configured catalogs",
-		Args:  cobra.NoArgs,
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List configured catalogs",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.OpenConfig(nemHome)
 			if err != nil {
@@ -137,9 +139,10 @@ func newCatalogListCmd() *cobra.Command {
 
 func newCatalogRemoveCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "remove <name>",
-		Short: "Remove a catalog",
-		Args:  cobra.ExactArgs(1),
+		Use:     "remove <name>",
+		Aliases: []string{"rm"},
+		Short:   "Remove a catalog",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 			release, err := fsx.Lock(nemHome.LockFile())
@@ -177,9 +180,10 @@ func newCatalogRemoveCmd() *cobra.Command {
 
 func newCatalogUpdateCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "update [name]",
-		Short: "Sync oci catalogs from their remote",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "update [name]",
+		Aliases: []string{"up"},
+		Short:   "Sync oci catalogs from their remote",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			release, err := fsx.Lock(nemHome.LockFile())
 			if err != nil {

@@ -47,6 +47,35 @@ func TestEveryRootCommandGrouped(t *testing.T) {
 	}
 }
 
+func TestCommandAliases(t *testing.T) {
+	root := newRoot()
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"cat"}, "catalog"},
+		{[]string{"st"}, "status"},
+		{[]string{"x"}, "exec"},
+		{[]string{"find"}, "search"},
+		{[]string{"cat", "ls"}, "list"},
+		{[]string{"catalog", "rm"}, "remove"},
+		{[]string{"catalog", "up"}, "update"},
+		{[]string{"catalog", "pub"}, "publish"},
+		{[]string{"catalog", "old"}, "outdated"},
+		{[]string{"self", "up"}, "update"},
+	}
+	for _, tt := range tests {
+		cmd, _, err := root.Find(tt.args)
+		if err != nil {
+			t.Errorf("Find(%v): %v", tt.args, err)
+			continue
+		}
+		if cmd.Name() != tt.want {
+			t.Errorf("Find(%v) resolved to %q, want %q", tt.args, cmd.Name(), tt.want)
+		}
+	}
+}
+
 func TestUnknownCommandIsUsageError(t *testing.T) {
 	root := newRoot()
 	root.SetArgs([]string{"definitely-not-a-command"})

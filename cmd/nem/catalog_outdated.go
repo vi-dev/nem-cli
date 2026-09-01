@@ -28,9 +28,10 @@ type outdatedRow struct {
 func newCatalogOutdatedCmd() *cobra.Command {
 	var jsonOut bool
 	cmd := &cobra.Command{
-		Use:   "outdated [dir|pkg.yaml]",
-		Short: "Report packages whose upstream has a newer version",
-		Args:  cobra.MaximumNArgs(1),
+		Use:     "outdated [dir|pkg.yaml]",
+		Aliases: []string{"old"},
+		Short:   "Report packages whose upstream has a newer version",
+		Args:    cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			target := "."
 			if len(args) == 1 {

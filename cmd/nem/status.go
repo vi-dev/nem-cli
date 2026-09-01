@@ -15,9 +15,10 @@ import (
 func newStatusCmd() *cobra.Command {
 	var global bool
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Show declared tools and composed environment variables",
-		Args:  cobra.NoArgs,
+		Use:     "status",
+		Aliases: []string{"st"},
+		Short:   "Show declared tools and composed environment variables",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStatus(global)
 		},

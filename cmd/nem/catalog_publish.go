@@ -10,9 +10,10 @@ func newCatalogPublishCmd() *cobra.Command {
 	var tags []string
 	var dryRun, force bool
 	cmd := &cobra.Command{
-		Use:   "publish <registry-ref> [dir]",
-		Short: "Publish a catalog directory to an OCI registry",
-		Args:  cobra.RangeArgs(1, 2),
+		Use:     "publish <registry-ref> [dir]",
+		Aliases: []string{"pub"},
+		Short:   "Publish a catalog directory to an OCI registry",
+		Args:    cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ref := args[0]
 			dir := "."

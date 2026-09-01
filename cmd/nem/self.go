@@ -27,8 +27,9 @@ func newSelfUpdateCmd() *cobra.Command {
 		check         bool
 	)
 	cmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update nem to the latest release",
+		Use:     "update",
+		Aliases: []string{"up"},
+		Short:   "Update nem to the latest release",
 		Long: "Download a nem release build, verify its checksum, and replace " +
 			"the running binary with it. Without --version, updates to the " +
 			"latest stable release.",
