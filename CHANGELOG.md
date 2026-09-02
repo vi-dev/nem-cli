@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0](https://github.com/vi-dev/nem-cli/compare/v0.2.0...v0.3.0) (2026-09-01)
+
+
+### Features
+
+* Add a test key proving a package actually works ([64f9266](https://github.com/vi-dev/nem-cli/commit/64f9266fa48b9b8605218954b26364aa4c1697c8))
+* Add air-gapped catalog support ([bbe7452](https://github.com/vi-dev/nem-cli/commit/bbe7452e3762c4334b8cd489b95edfa944381809))
+* Add autotools and generator tools to the build image ([5d738a4](https://github.com/vi-dev/nem-cli/commit/5d738a413a984ac882ce890e5cfceaf55e26453a))
+* Add rootless runtime image variant ([5f6f88d](https://github.com/vi-dev/nem-cli/commit/5f6f88d735a7217a8173b0600782739138d47ac6))
+* Add short aliases for common commands ([8bbc2db](https://github.com/vi-dev/nem-cli/commit/8bbc2db877288d76b609b09f77277bb735e91fef))
+* Make resolution order-independent via two-phase selection ([03e6950](https://github.com/vi-dev/nem-cli/commit/03e69501ff970d2c84fd1f8e9273908c3294b748))
+* Shell completions ([4e3163f](https://github.com/vi-dev/nem-cli/commit/4e3163f25eb647933e306b7a2c888cdaf1a6fb03))
+* Support directory targets in nem catalog bump ([b46b70b](https://github.com/vi-dev/nem-cli/commit/b46b70bcac4fe78d800a8e69658f7dde02cc7de8))
+
+
+### Bug Fixes
+
+* Add darwin headerpad so normalize can grow load commands ([feb4384](https://github.com/vi-dev/nem-cli/commit/feb4384ad0615dc8aef352069e8367ada02c597b))
+* Add rpaths to a package's own libs during darwin normalize ([e48be8a](https://github.com/vi-dev/nem-cli/commit/e48be8a3ab5bab6d082a6231c6d1cbe52130a984))
+* Serialize console narration for concurrent writers ([ae07f17](https://github.com/vi-dev/nem-cli/commit/ae07f177e21cca9160eed92f3c2ec20f72146056))
+* Skip a build whose package excludes the host platform ([9b78c47](https://github.com/vi-dev/nem-cli/commit/9b78c471db3dd6320b4382eac7f246619f3cab15))
+
+
+### Performance
+
+* Open the catalog mirror once per command ([de1cd07](https://github.com/vi-dev/nem-cli/commit/de1cd07d36ba5c96633eddf44b85c0efafdf269d))
+
 ## [0.2.0](https://github.com/vi-dev/nem-cli/compare/v0.1.1...v0.2.0) (2026-08-21)
 
 
