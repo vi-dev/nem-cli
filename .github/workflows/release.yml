@@ -83,8 +83,9 @@ jobs:
           cat dist/digests.txt
           root="$(docker buildx imagetools inspect "ghcr.io/vi-dev/nem-cli:${TAG}" --format '{{.Manifest.Digest}}')"
           rootless="$(docker buildx imagetools inspect "ghcr.io/vi-dev/nem-cli:${TAG}-rootless" --format '{{.Manifest.Digest}}')"
-          published="$(awk '{print $1}' dist/digests.txt | sort -u)"
-          expected="$(printf '%s\n%s\n' "${root}" "${rootless}" | sort -u)"
+          # digests.txt lists bare hex digests; imagetools prints sha256:<hex>.
+          published="$(awk '{print $1}' dist/digests.txt | sed 's/^sha256://' | sort -u)"
+          expected="$(printf '%s\n%s\n' "${root#sha256:}" "${rootless#sha256:}" | sort -u)"
           if [ "${published}" != "${expected}" ]; then
             echo "digests.txt does not match the two pushed manifests:" >&2
             echo "digests.txt: ${published}" >&2
