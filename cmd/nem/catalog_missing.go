@@ -91,8 +91,8 @@ func newCatalogMissingCmd() *cobra.Command {
 			}
 
 			if jsonOut {
-				grouped := make(map[string][]missingRow, len(spec.Supported))
-				for _, plat := range spec.Supported {
+				grouped := make(map[string][]missingRow, len(spec.SupportedPlatforms))
+				for _, plat := range spec.SupportedPlatforms {
 					grouped[plat.String()] = []missingRow{}
 				}
 				for _, e := range entries {

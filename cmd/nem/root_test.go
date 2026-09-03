@@ -55,6 +55,7 @@ func TestCommandAliases(t *testing.T) {
 	}{
 		{[]string{"cat"}, "catalog"},
 		{[]string{"st"}, "status"},
+		{[]string{"up"}, "update"},
 		{[]string{"x"}, "exec"},
 		{[]string{"find"}, "search"},
 		{[]string{"cat", "ls"}, "list"},

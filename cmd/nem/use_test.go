@@ -302,7 +302,7 @@ func TestUnuseUnknownErrors(t *testing.T) {
 // need a real registry or download target).
 func otherPlatform(t *testing.T) spec.Platform {
 	t.Helper()
-	for _, p := range spec.Supported {
+	for _, p := range spec.SupportedPlatforms {
 		if p != spec.Current() {
 			return p
 		}
@@ -566,6 +566,53 @@ func TestUseIgnoresDisabledCatalog(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(projDir, "nem.toml")); err != nil {
 		t.Fatalf("nem.toml should be written: %v", err)
+	}
+}
+
+func TestUseBoundedResolutionIsQuiet(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+
+	catalogRoot := versionedDirCatalog(t, map[string][]string{"lib": {"v2.0.0", "v1.0.0"}})
+	appDir := filepath.Join(catalogRoot, "pkgs", "app")
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	libYAML, err := os.ReadFile(filepath.Join(catalogRoot, "pkgs", "lib", "pkg.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	appYAML := strings.Replace(string(libYAML), "name: lib", "name: app\ndeps:\n  - {name: lib, version: v1.0.0}", 1)
+	if err := os.WriteFile(filepath.Join(appDir, "pkg.yaml"), []byte(appYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, err := runNem(t, nemHomeDir, "catalog", "add", "demo", catalogRoot); err != nil {
+		t.Fatal(err)
+	}
+	if _, errb, err := runNem(t, nemHomeDir, "use", "demo:app@v1.0.0"); err != nil {
+		t.Fatalf("use app: %v\n%s", err, errb)
+	}
+
+	_, errb, err := runNem(t, nemHomeDir, "use", "demo:lib")
+	if err != nil {
+		t.Fatalf("a version-less use bounded by a dep must succeed: %v\n%s", err, errb)
+	}
+	if strings.Contains(errb, "constrained by") {
+		t.Fatalf("a bounded pick is normal operation and must not be narrated: %q", errb)
+	}
+
+	m, err := project.LoadManifest(filepath.Join(projDir, "nem.toml"))
+	if err != nil {
+		t.Fatalf("LoadManifest: %v", err)
+	}
+	got := map[string]string{}
+	for _, tool := range m.Tools {
+		got[tool.Key.Name] = tool.Version
+	}
+	if got["lib"] != "v1.0.0" {
+		t.Fatalf("manifest lib = %q, want the bounded v1.0.0", got["lib"])
 	}
 }
 

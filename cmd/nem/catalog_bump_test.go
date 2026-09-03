@@ -23,7 +23,7 @@ import (
 func bumpArtifactServer(t *testing.T, version string) (*httptest.Server, map[string]string) {
 	t.Helper()
 	sums := map[string]string{}
-	for _, p := range spec.Supported {
+	for _, p := range spec.SupportedPlatforms {
 		body := "artifact " + version + " " + p.String()
 		s := sha256.Sum256([]byte(body))
 		sums[p.String()] = hex.EncodeToString(s[:])
@@ -138,7 +138,7 @@ func bumpMultiArtifactServer(t *testing.T, versions ...string) (*httptest.Server
 	sums := map[string]string{}
 	for _, v := range versions {
 		serve[v] = true
-		for _, p := range spec.Supported {
+		for _, p := range spec.SupportedPlatforms {
 			body := "artifact " + v + " " + p.String()
 			s := sha256.Sum256([]byte(body))
 			sums[v+" "+p.String()] = hex.EncodeToString(s[:])

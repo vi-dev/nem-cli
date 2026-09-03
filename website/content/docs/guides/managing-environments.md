@@ -16,12 +16,28 @@ nem use [<catalog>:]<pkg>[@<version>]...
 files: the version in `nem.toml`, the exact resolved closure — with
 SHA-256 digests — and transitive dependencies in `nem.lock`.
 
-If `@<version>` is not specified, `nem` resolves the latest version available in its catalogs. 
+If `@<version>` is not specified, `nem` resolves the newest version that
+fits the environment's other tools. 
 If `<catalog>:` is not specified, `nem` searches for the tool in all catalogs, in order, until it finds a match.
 
 `nem unuse <pkg>...` removes declarations from `nem.toml` and re-resolves
 `nem.lock`. It never deletes installed tools — other projects on the same
 machine may still be using them.
+
+## Updating tools
+
+```shell
+nem update [<pkg>...]
+```
+
+`nem update` (alias `up`) re-resolves declared tools — all, or just the
+ones named — to their catalog's latest, exactly as if you re-ran `nem use`
+for each. `-g` targets the global manifest; `--dry-run` reports the plan
+without writing anything. It never downgrades and never re-syncs mirrors —
+a stale mirror earns a warning to run `nem catalog update` first. Each
+tool settles on the newest version its dependents allow; a pick below the
+declared version is refused, and conflicting declarations fail the update
+with the clashing requirements.
 
 ## Project vs. global scope
 

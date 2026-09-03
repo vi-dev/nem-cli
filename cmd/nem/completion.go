@@ -69,9 +69,14 @@ func completeDeclaredPackages(global bool, args []string, toComplete string) ([]
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	// Suggestions are bare names, so typed args count by bare name too.
 	used := make(map[string]bool, len(args))
 	for _, a := range args {
-		used[a] = true
+		if key, err := project.ParseToolKey(a); err == nil {
+			used[key.Name] = true
+		} else {
+			used[a] = true
+		}
 	}
 	var out []string
 	for _, tool := range manifest.Tools {

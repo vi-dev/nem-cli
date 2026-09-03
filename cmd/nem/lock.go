@@ -1,16 +1,13 @@
 package main
 
 import (
-	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/vi-dev/nem-cli/internal/fsx"
 	"github.com/vi-dev/nem-cli/internal/install"
-	"github.com/vi-dev/nem-cli/internal/project"
 	"github.com/vi-dev/nem-cli/internal/resolve"
 )
 
@@ -56,14 +53,9 @@ func runLock(cmd *cobra.Command, global bool) error {
 		release()
 		return err
 	}
-	// Discover guarantees a project manifest exists, but the global path is
-	// returned unchecked — and LoadManifest treats a missing file as empty,
-	// which would regenerate the global lock down to nothing. Refuse instead.
-	if global {
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			release()
-			return fmt.Errorf("%w at %s", project.ErrNoManifest, path)
-		}
+	if err := requireGlobalManifest(global, path); err != nil {
+		release()
+		return err
 	}
 	manifest, cfg, sources, err := loadUseState(path)
 	if err != nil {

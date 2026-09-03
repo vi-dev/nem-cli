@@ -132,6 +132,46 @@ func TestCompleteUnuseDeclaredPackages(t *testing.T) {
 	}
 }
 
+func TestCompleteUpdateDeclaredPackages(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+	manifest := "[tools]\ngo = \"1.24.0\"\n\"official:node\" = \"22.0.0\"\n"
+	if err := os.WriteFile(filepath.Join(projDir, "nem.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runNemComplete(t, nemHomeDir, "update", "")
+	for _, w := range []string{"go\n", "node\n"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("missing %q:\n%s", w, out)
+		}
+	}
+
+	out = runNemComplete(t, nemHomeDir, "update", "go", "")
+	if strings.Contains(out, "go\n") {
+		t.Errorf("already-typed package suggested again:\n%s", out)
+	}
+}
+
+func TestCompleteQualifiedArgNotResuggested(t *testing.T) {
+	nemHomeDir := t.TempDir()
+	projDir := t.TempDir()
+	chdir(t, projDir)
+	manifest := "[tools]\n\"demo:tool\" = \"1.0.0\"\ngo = \"1.24.0\"\n"
+	if err := os.WriteFile(filepath.Join(projDir, "nem.toml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := runNemComplete(t, nemHomeDir, "update", "demo:tool", "")
+	if strings.Contains(out, "tool\n") {
+		t.Errorf("a package typed with its qualifier must not be suggested again:\n%s", out)
+	}
+	if !strings.Contains(out, "go\n") {
+		t.Errorf("other declared packages stay suggested:\n%s", out)
+	}
+}
+
 func TestCompleteUnuseNoManifestIsSilent(t *testing.T) {
 	nemHomeDir := t.TempDir()
 	projDir := t.TempDir()

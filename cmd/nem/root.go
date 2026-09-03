@@ -79,7 +79,7 @@ func newRoot() *cobra.Command {
 		&cobra.Group{ID: groupShell, Title: "Shell integration:"},
 		&cobra.Group{ID: groupMaintenance, Title: "Maintenance:"},
 	)
-	addGrouped(root, groupEnvironment, newUseCmd(), newUnuseCmd(), newLockCmd(), newSyncCmd(), newStatusCmd(), newExecCmd(), newWhichCmd())
+	addGrouped(root, groupEnvironment, newUseCmd(), newUnuseCmd(), newUpdateCmd(), newLockCmd(), newSyncCmd(), newStatusCmd(), newExecCmd(), newWhichCmd())
 	addGrouped(root, groupDiscovery, newSearchCmd(), newInfoCmd())
 	addGrouped(root, groupCatalogs, newCatalogCmd())
 	addGrouped(root, groupShell, newActivateCmd(), newDeactivateCmd(), newEnvCmd())

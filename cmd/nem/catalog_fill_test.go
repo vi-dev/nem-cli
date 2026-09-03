@@ -59,7 +59,7 @@ func TestCatalogFillCmd(t *testing.T) {
 		t.Fatalf("stderr missing summary line:\n%s", errb)
 	}
 
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		got, err := ocix.ArchiveLayerDigest(context.Background(), archives, "1.0.0", plat)
 		if err != nil {
 			t.Fatalf("resolve published archive for %s: %v", plat, err)
@@ -89,7 +89,7 @@ func TestCatalogFillCmdDryRunWritesNothing(t *testing.T) {
 	// transient status, invisible outside a live TTY block; the scroll
 	// carries the package's completion line and summary, worded "Would
 	// fill" under dry-run.
-	wantOutcome := fmt.Sprintf("Would fill go (%d fill(s), 0 heal(s))", len(spec.Supported))
+	wantOutcome := fmt.Sprintf("Would fill go (%d fill(s), 0 heal(s))", len(spec.SupportedPlatforms))
 	if !strings.Contains(errb, wantOutcome) {
 		t.Fatalf("stderr missing package completion line %q:\n%s", wantOutcome, errb)
 	}

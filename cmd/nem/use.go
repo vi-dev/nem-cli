@@ -115,6 +115,19 @@ func manifestPath(global, createIfMissing bool) (string, error) {
 	return filepath.Join(dir, "nem.toml"), nil
 }
 
+// requireGlobalManifest refuses a missing global manifest: manifestPath
+// returns the global path unchecked, and LoadManifest treats a missing
+// file as empty, which would silently act on nothing.
+func requireGlobalManifest(global bool, path string) error {
+	if !global {
+		return nil
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w at %s", project.ErrNoManifest, path)
+	}
+	return nil
+}
+
 // loadUseState loads the target manifest plus the catalog config and
 // sources use/unuse resolve against.
 func loadUseState(path string) (*project.Manifest, *config.Config, []catalog.Named, error) {
@@ -238,6 +251,37 @@ func autoSyncUnsyncedCatalogs(ctx context.Context, cfg *config.Config, sources [
 	return nil
 }
 
+// resolveManifest cold-syncs never-synced oci catalogs, then resolves the
+// manifest's tools as they currently stand.
+func resolveManifest(cmd *cobra.Command, manifest *project.Manifest, cfg *config.Config, sources []catalog.Named) (*resolve.Result, error) {
+	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg, sources); err != nil {
+		return nil, err
+	}
+	return resolve.Resolve(cmd.Context(), manifestTools(manifest), sources)
+}
+
+// resolvedVersions maps each resolved package name to its version.
+func resolvedVersions(result *resolve.Result) map[string]string {
+	m := make(map[string]string, len(result.Entries))
+	for _, e := range result.Entries {
+		m[e.Name] = e.Version
+	}
+	return m
+}
+
+// pinResolved pins each key's resolved version in the manifest — a
+// version-less entry records what resolution chose — then persists
+// manifest and lock.
+func pinResolved(manifest *project.Manifest, result *resolve.Result, keys []project.ToolKey) error {
+	resolved := resolvedVersions(result)
+	for _, k := range keys {
+		if v, ok := resolved[k.Name]; ok {
+			project.AddTool(manifest, k, v)
+		}
+	}
+	return writeManifestAndLock(manifest, result)
+}
+
 func runUse(cmd *cobra.Command, args []string, global bool) error {
 	parsedArgs := make([]useArg, len(args))
 	for i, a := range args {
@@ -264,35 +308,18 @@ func runUse(cmd *cobra.Command, args []string, global bool) error {
 		return err
 	}
 
-	if err := autoSyncUnsyncedCatalogs(cmd.Context(), cfg, sources); err != nil {
-		release()
-		return err
-	}
-
-	for _, p := range parsedArgs {
+	keys := make([]project.ToolKey, len(parsedArgs))
+	for i, p := range parsedArgs {
 		project.AddTool(manifest, p.Key, p.Version)
+		keys[i] = p.Key
 	}
 
-	result, err := resolve.Resolve(cmd.Context(), manifestTools(manifest), sources)
+	result, err := resolveManifest(cmd, manifest, cfg, sources)
 	if err != nil {
 		release()
 		return err
 	}
-
-	// nem.toml records the exact resolved version for each used package, so a
-	// version-less `use <pkg>` pins the resolved version instead of leaving
-	// the manifest entry empty.
-	resolved := make(map[string]string, len(result.Entries))
-	for _, e := range result.Entries {
-		resolved[e.Name] = e.Version
-	}
-	for _, p := range parsedArgs {
-		if v, ok := resolved[p.Key.Name]; ok {
-			project.AddTool(manifest, p.Key, v)
-		}
-	}
-
-	if err := writeManifestAndLock(manifest, result); err != nil {
+	if err := pinResolved(manifest, result, keys); err != nil {
 		release()
 		return err
 	}
