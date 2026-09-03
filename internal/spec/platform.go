@@ -12,8 +12,8 @@ import (
 // "any supported arch of this OS".
 type Platform struct{ OS, Arch string }
 
-// Supported is the exact platform matrix nem targets.
-var Supported = []Platform{
+// SupportedPlatforms is the exact platform matrix nem targets.
+var SupportedPlatforms = []Platform{
 	{"darwin", "arm64"}, {"darwin", "amd64"},
 	{"linux", "arm64"}, {"linux", "amd64"},
 }
@@ -52,7 +52,7 @@ func PlatformsInclude(list []Platform, p Platform) bool {
 func ParsePlatform(s string) (Platform, error) {
 	osPart, arch, _ := strings.Cut(s, "/")
 	p := Platform{OS: osPart, Arch: arch}
-	for _, sup := range Supported {
+	for _, sup := range SupportedPlatforms {
 		if p.Matches(sup) {
 			return p, nil
 		}

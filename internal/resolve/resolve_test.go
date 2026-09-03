@@ -80,6 +80,70 @@ versions:
 	}
 }
 
+func TestResolveRangePicksHighestMatch(t *testing.T) {
+	root := t.TempDir()
+	// Versions listed out of order: a range names its highest match, not
+	// the first listed.
+	writePkg(t, root, `
+schema: 2
+name: lib
+libs: [lib]
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v2.0.0
+  - v1.8.0
+  - v1.9.0
+`)
+	writePkg(t, root, `
+schema: 2
+name: app
+deps:
+  - {name: lib, kind: link, compat: "1"}
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.0.0
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "app"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if e := entry(t, res, "lib"); e.Version != "v1.9.0" {
+		t.Fatalf("the range must name its highest match: %+v", e)
+	}
+}
+
+func TestResolveVersionlessKeepsListOrderLatest(t *testing.T) {
+	root := t.TempDir()
+	// A stable promoted above a newer-comparing prerelease: list order,
+	// not version comparison, names the latest.
+	writePkg(t, root, `
+schema: 2
+name: a
+artifact:
+  oci: ":{{.Version}}"
+install:
+  - extract: {}
+versions:
+  - v1.2.3
+  - v1.3.0-rc1
+`)
+	tools := []resolve.Tool{{Key: project.ToolKey{Name: "a"}}}
+	res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if e := entry(t, res, "a"); e.Version != "v1.2.3" {
+		t.Fatalf("latest must be the list's top satisfying entry: %+v", e)
+	}
+}
+
 func TestResolveDepChain(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
@@ -220,21 +284,23 @@ versions:
 				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
 			}
 			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
+			var sce *resolve.CompatConflictError
 			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+				t.Fatalf("want CompatConflictError, got %v", err)
 			}
-			if sce.Name != "d" || sce.A != "v1.0.0" || sce.ASource != "p1" || sce.B != "v2.0.0" || sce.BSource != "p2" {
+			if sce.Name != "d" || strings.Join(sce.Compats, ",") != "v1.0.0,v2.0.0" {
 				t.Fatalf("conflict fields should be canonical in any order: %+v", sce)
+			}
+			if !strings.Contains(err.Error(), "conflicting requirements v1.0.0, v2.0.0") {
+				t.Fatalf("error should state the requirements without attribution: %v", err)
 			}
 		})
 	}
 }
 
-// TestResolveUnpinnedRootVsExactDepConflicts proves a version-less direct
-// tool demands its resolved latest: a dep edge naming a different exact
-// version conflicts instead of being silently outvoted.
-func TestResolveUnpinnedRootVsExactDepConflicts(t *testing.T) {
+// TestResolveUnpinnedRootYieldsToExactDep proves a version-less direct
+// tool floats: a dep edge naming an exact version decides it.
+func TestResolveUnpinnedRootYieldsToExactDep(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
 schema: 2
@@ -272,13 +338,12 @@ versions:
 	}
 	for name, tools := range orders {
 		t.Run(name, func(t *testing.T) {
-			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
-			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+			res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
 			}
-			if sce.Name != "a" {
-				t.Fatalf("conflict should name a: %+v", sce)
+			if e := entry(t, res, "a"); e.Version != "v1.0.0" || e.Catalog != "cat" || !e.Direct {
+				t.Fatalf("the unpinned root must yield to the exact dep: %+v", e)
 			}
 		})
 	}
@@ -527,9 +592,139 @@ versions: [v1.0.0]
 	}
 }
 
-// TestResolveDisjointRangesCanonicalConflict proves the reported pair of
-// a multi-range conflict is canonical: with three pairwise-disjoint
-// ranges, every tools permutation reports the same two.
+func TestResolveUnpinnedQualifiedRootSelectsFromItsCatalog(t *testing.T) {
+	rootA := t.TempDir()
+	writePkg(t, rootA, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.0.0, v1.0.0]
+`)
+	writePkg(t, rootA, `
+schema: 2
+name: app
+deps: [{name: shared, version: v1.0.0}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	rootB := t.TempDir()
+	writePkg(t, rootB, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v2.0.0, v1.0.0]
+`)
+	sources := []catalog.Named{
+		{Name: "a", Source: catalog.NewDir(rootA)},
+		{Name: "b", Source: catalog.NewDir(rootB)},
+	}
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Catalog: "b", Name: "shared"}},
+		{Key: project.ToolKey{Name: "app"}},
+	}
+	res, err := resolve.Resolve(context.Background(), tools, sources)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if e := entry(t, res, "shared"); e.Version != "v1.0.0" || e.Catalog != "b" {
+		t.Fatalf("the yielded pick must come from the qualified catalog: %+v", e)
+	}
+}
+
+func TestResolveUnpinnedQualifiedRootMissingBoundVersionErrors(t *testing.T) {
+	rootA := t.TempDir()
+	writePkg(t, rootA, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.0.0, v1.0.0]
+`)
+	writePkg(t, rootA, `
+schema: 2
+name: app
+deps: [{name: shared, version: v1.0.0}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	rootB := t.TempDir()
+	writePkg(t, rootB, `
+schema: 2
+name: shared
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v2.0.0]
+`)
+	sources := []catalog.Named{
+		{Name: "a", Source: catalog.NewDir(rootA)},
+		{Name: "b", Source: catalog.NewDir(rootB)},
+	}
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Catalog: "b", Name: "shared"}},
+		{Key: project.ToolKey{Name: "app"}},
+	}
+	_, err := resolve.Resolve(context.Background(), tools, sources)
+	var vnf *catalog.VersionNotFoundError
+	if !errors.As(err, &vnf) {
+		t.Fatalf("want VersionNotFoundError when the bound version is absent from the qualified catalog, got %v", err)
+	}
+	if vnf.Catalog != "b" {
+		t.Fatalf("error should name the qualified catalog: %+v", vnf)
+	}
+}
+
+func TestResolveQualifiedRootMissingRangeErrors(t *testing.T) {
+	rootA := t.TempDir()
+	writePkg(t, rootA, `
+schema: 2
+name: shared
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v3.0.0, v1.9.5]
+`)
+	writePkg(t, rootA, `
+schema: 2
+name: app
+deps: [{name: shared, kind: link, compat: "1.9"}]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v1.0.0]
+`)
+	rootB := t.TempDir()
+	writePkg(t, rootB, `
+schema: 2
+name: shared
+libs: [lib]
+artifact: {oci: ":{{.Version}}"}
+install: [{extract: {}}]
+versions: [v2.0.0]
+`)
+	sources := []catalog.Named{
+		{Name: "a", Source: catalog.NewDir(rootA)},
+		{Name: "b", Source: catalog.NewDir(rootB)},
+	}
+	tools := []resolve.Tool{
+		{Key: project.ToolKey{Catalog: "b", Name: "shared"}},
+		{Key: project.ToolKey{Name: "app"}},
+	}
+	_, err := resolve.Resolve(context.Background(), tools, sources)
+	var vnf *catalog.VersionNotFoundError
+	if !errors.As(err, &vnf) {
+		t.Fatalf("want VersionNotFoundError when the qualified catalog lists no version in range, got %v", err)
+	}
+	if vnf.Catalog != "b" {
+		t.Fatalf("error should name the qualified catalog: %+v", vnf)
+	}
+}
+
+// TestResolveDisjointRangesCanonicalConflict proves a multi-range
+// conflict reports every range canonically: the same ordered set for
+// every tools permutation.
 func TestResolveDisjointRangesCanonicalConflict(t *testing.T) {
 	root := t.TempDir()
 	for _, p := range []struct{ name, compat string }{
@@ -565,12 +760,12 @@ versions: [v3.0.0, v2.0.0, v1.0.0]
 				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
 			}
 			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
+			var sce *resolve.CompatConflictError
 			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+				t.Fatalf("want CompatConflictError, got %v", err)
 			}
-			if sce.Name != "openssl" || sce.A != "1" || sce.ASource != "r1" || sce.B != "2" || sce.BSource != "r2" {
-				t.Fatalf("conflict pair should be canonical in any order: %+v", sce)
+			if sce.Name != "openssl" || strings.Join(sce.Compats, ",") != "1,2,3" {
+				t.Fatalf("conflict should list every range canonically in any order: %+v", sce)
 			}
 		})
 	}
@@ -729,9 +924,9 @@ versions: [v3.5.1, v1.1.1]
 `)
 	tools := []resolve.Tool{{Key: project.ToolKey{Name: "p1"}}, {Key: project.ToolKey{Name: "p2"}}}
 	_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-	var sce *resolve.SonameConflictError
+	var sce *resolve.CompatConflictError
 	if !errors.As(err, &sce) {
-		t.Fatalf("want SonameConflictError, got %v", err)
+		t.Fatalf("want CompatConflictError, got %v", err)
 	}
 	if sce.Name != "openssl" {
 		t.Fatalf("conflict should name openssl: %+v", sce)
@@ -1119,9 +1314,9 @@ versions: [v3.5.1, v1.1.1]
 	for name, tools := range orders {
 		t.Run(name, func(t *testing.T) {
 			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
+			var sce *resolve.CompatConflictError
 			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+				t.Fatalf("want CompatConflictError, got %v", err)
 			}
 			if sce.Name != "openssl" {
 				t.Fatalf("conflict should name openssl: %+v", sce)
@@ -1135,7 +1330,7 @@ versions: [v3.5.1, v1.1.1]
 // excludes latest conflicts in either reconcile order instead of silently
 // floating the tool down into the range. Single-platform packages so no
 // second platform walk re-reconciles the root.
-func TestResolveUnpinnedRootOutsideCompatRangeConflicts(t *testing.T) {
+func TestResolveUnpinnedRootYieldsToCompatRange(t *testing.T) {
 	root := t.TempDir()
 	writePkg(t, root, `
 schema: 2
@@ -1167,13 +1362,12 @@ versions: [v4.0.0, v3.5.1]
 	}
 	for name, tools := range orders {
 		t.Run(name, func(t *testing.T) {
-			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
-			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+			res, err := resolve.Resolve(context.Background(), tools, namedSources(root))
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
 			}
-			if sce.Name != "openssl" {
-				t.Fatalf("conflict should name openssl: %+v", sce)
+			if e := entry(t, res, "openssl"); e.Version != "v3.5.1" {
+				t.Fatalf("the unpinned root must settle on the range's highest: %+v", e)
 			}
 		})
 	}
@@ -1231,12 +1425,12 @@ versions: [v1.9.0, v1.8.0]
 				tools[i] = resolve.Tool{Key: project.ToolKey{Name: n}}
 			}
 			_, err := resolve.Resolve(context.Background(), tools, namedSources(root))
-			var sce *resolve.SonameConflictError
+			var sce *resolve.CompatConflictError
 			if !errors.As(err, &sce) {
-				t.Fatalf("want SonameConflictError, got %v", err)
+				t.Fatalf("want CompatConflictError, got %v", err)
 			}
-			if sce.Name != "openssl" || sce.A != "v1.8.0" || sce.ASource != "p1" || sce.B != "v1.9.0" || sce.BSource != "p2" {
-				t.Fatalf("conflict fields should be canonical in any order: %+v", sce)
+			if sce.Name != "openssl" || strings.Join(sce.Compats, ",") != "v1.8.0,1.9,v1.9.0" {
+				t.Fatalf("conflict should list every requirement canonically: %+v", sce)
 			}
 		})
 	}

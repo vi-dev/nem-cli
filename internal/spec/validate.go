@@ -23,10 +23,10 @@ var TagRE = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}$`)
 // pairs: the declared subset, or all four when unconstrained.
 func (p *Package) SupportedBy() []Platform {
 	if len(p.Platforms) == 0 {
-		return Supported
+		return SupportedPlatforms
 	}
 	var out []Platform
-	for _, sup := range Supported {
+	for _, sup := range SupportedPlatforms {
 		for _, c := range p.Platforms {
 			if c.Matches(sup) {
 				out = append(out, sup)

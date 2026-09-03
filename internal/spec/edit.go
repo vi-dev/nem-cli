@@ -94,7 +94,7 @@ func locateVersions(f *ast.File) (*ast.SequenceNode, error) {
 
 // renderVersionEntry renders e as block-style YAML indented to sit
 // directly under a top-level "versions:" key. Platform keys follow the
-// Supported order; hash values are quoted.
+// SupportedPlatforms order; hash values are quoted.
 func renderVersionEntry(e VersionEntry) string {
 	var b strings.Builder
 	if len(e.Sha256) == 0 && e.SourceSha256 == "" {
@@ -107,7 +107,7 @@ func renderVersionEntry(e VersionEntry) string {
 	}
 	if len(e.Sha256) > 0 {
 		b.WriteString("    sha256:\n")
-		for _, p := range Supported {
+		for _, p := range SupportedPlatforms {
 			if sum, ok := e.Sha256[p.String()]; ok {
 				fmt.Fprintf(&b, "      %s: %q\n", p, sum)
 			}

@@ -59,7 +59,7 @@ func TestPlatformsInclude(t *testing.T) {
 }
 
 func TestSupported(t *testing.T) {
-	if len(Supported) != 4 {
-		t.Fatalf("want 4 supported platforms, got %d", len(Supported))
+	if len(SupportedPlatforms) != 4 {
+		t.Fatalf("want 4 supported platforms, got %d", len(SupportedPlatforms))
 	}
 }

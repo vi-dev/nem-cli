@@ -38,8 +38,8 @@ func PublishCatalogForTest(t testing.TB, target oras.Target, ref string, pkgs ma
 
 // UniformSha256 pins hexDigest for every supported platform, keyed as URLPkgYAML expects.
 func UniformSha256(hexDigest string) map[string]string {
-	m := make(map[string]string, len(spec.Supported))
-	for _, p := range spec.Supported {
+	m := make(map[string]string, len(spec.SupportedPlatforms))
+	for _, p := range spec.SupportedPlatforms {
 		m[p.String()] = hexDigest
 	}
 	return m
@@ -49,7 +49,7 @@ func UniformSha256(hexDigest string) map[string]string {
 func URLPkgYAML(name, version, urlTemplate string, sha256 map[string]string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "schema: 2\nname: %s\ndescription: test package\nartifact:\n  url: %q\ninstall:\n  - extract: {strip: 0}\nversions:\n  - version: %s\n    sha256:\n", name, urlTemplate, version)
-	for _, p := range spec.Supported {
+	for _, p := range spec.SupportedPlatforms {
 		fmt.Fprintf(&b, "      %s: %q\n", p, sha256[p.String()])
 	}
 	return []byte(b.String())

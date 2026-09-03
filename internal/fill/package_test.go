@@ -28,14 +28,14 @@ func TestFillItemPresentSkipsDownload(t *testing.T) {
 
 	archives := memory.New()
 	platMap := map[string][]byte{}
-	for _, p := range spec.Supported {
+	for _, p := range spec.SupportedPlatforms {
 		platMap[p.String()] = payload
 	}
 	ocix.PushFakeArchive(t, archives, "1.0.0", platMap)
 
 	rep := &fakeReporter{}
 	task := rep.Task("test")
-	got, _ := fillItem(context.Background(), newHome(t), archives, pkg, "1.0.0", spec.Supported[0], false, rep, task)
+	got, _ := fillItem(context.Background(), newHome(t), archives, pkg, "1.0.0", spec.SupportedPlatforms[0], false, rep, task)
 	if got != outcomePresent {
 		t.Fatalf("outcome = %v, want outcomePresent", got)
 	}
@@ -56,7 +56,7 @@ func TestFillItemAbsentDownloadsAndPublishes(t *testing.T) {
 	pkg := testPkg(t, up.URL+"/{{.Version}}", sha256Hex(payload))
 
 	archives := memory.New()
-	plat := spec.Supported[0]
+	plat := spec.SupportedPlatforms[0]
 
 	rep := &fakeReporter{}
 	got, entry := fillItem(context.Background(), newHome(t), archives, pkg, "1.0.0", plat, false, rep, rep.Task("test"))
@@ -99,7 +99,7 @@ func TestFillItemHealsDifferingDigest(t *testing.T) {
 	pkg := testPkg(t, up.URL+"/{{.Version}}", sha256Hex(newPayload))
 
 	archives := memory.New()
-	plat := spec.Supported[0]
+	plat := spec.SupportedPlatforms[0]
 	ocix.PushFakeArchive(t, archives, "1.0.0", map[string][]byte{plat.String(): []byte("old-payload")})
 
 	rep := &fakeReporter{}
@@ -134,7 +134,7 @@ func TestFillItemShaLookupFailureWarnsAndFails(t *testing.T) {
 	archives := memory.New()
 
 	rep := &fakeReporter{}
-	got, _ := fillItem(context.Background(), newHome(t), archives, pkg, "9.9.9", spec.Supported[0], false, rep, rep.Task("test"))
+	got, _ := fillItem(context.Background(), newHome(t), archives, pkg, "9.9.9", spec.SupportedPlatforms[0], false, rep, rep.Task("test"))
 	if got != outcomeFailed {
 		t.Fatalf("outcome = %v, want outcomeFailed for an undeclared version", got)
 	}

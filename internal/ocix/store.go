@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"oras.land/oras-go/v2"
@@ -123,6 +124,16 @@ func openLocalTarget(storePath string) (*localTarget, error) {
 		}
 	}
 	return &localTarget{ReadOnlyStorage: storage, tags: tags}, nil
+}
+
+// LastSynced reports when the store at storePath last completed a sync,
+// from its index's modification time.
+func LastSynced(storePath string) (time.Time, error) {
+	fi, err := os.Stat(filepath.Join(storePath, ocispec.ImageIndexFile))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return fi.ModTime(), nil
 }
 
 // OpenLocalStore opens a Store at storePath. ErrNotSynced reports a store that was never synced.

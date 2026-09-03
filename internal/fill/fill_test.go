@@ -94,20 +94,20 @@ func TestRunFillsMissingArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if summary.Filled != len(spec.Supported) || summary.Healed != 0 || summary.Present != 0 || summary.Failed != 0 || summary.NotFillable != 0 {
-		t.Fatalf("summary = %+v, want Filled:%d only", summary, len(spec.Supported))
+	if summary.Filled != len(spec.SupportedPlatforms) || summary.Healed != 0 || summary.Present != 0 || summary.Failed != 0 || summary.NotFillable != 0 {
+		t.Fatalf("summary = %+v, want Filled:%d only", summary, len(spec.SupportedPlatforms))
 	}
 
 	task := rep.taskFor("Filling go")
 	if task == nil {
 		t.Fatal("no task for go")
 	}
-	wantOutcome := fmt.Sprintf("Filled go (%d fill(s), 0 heal(s))", len(spec.Supported))
+	wantOutcome := fmt.Sprintf("Filled go (%d fill(s), 0 heal(s))", len(spec.SupportedPlatforms))
 	if done, failed, outcome := task.snapshot(); !done || failed || outcome != wantOutcome {
 		t.Fatalf("go task done=%v failed=%v outcome=%q, want done %q", done, failed, outcome, wantOutcome)
 	}
 
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		got, err := ocix.ArchiveLayerDigest(context.Background(), archives.open("go"), "1.0.0", plat)
 		if err != nil {
 			t.Fatalf("resolve published archive for %s: %v", plat, err)
@@ -133,7 +133,7 @@ func TestRunPresentSkipsDownload(t *testing.T) {
 	archives := newArchiveFixtures()
 	s := memory.New()
 	platMap := map[string][]byte{}
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		platMap[plat.String()] = payload
 	}
 	ocix.PushFakeArchive(t, s, "1.0.0", platMap)
@@ -145,7 +145,7 @@ func TestRunPresentSkipsDownload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	want := Summary{Packages: 1, Present: len(spec.Supported)}
+	want := Summary{Packages: 1, Present: len(spec.SupportedPlatforms)}
 	if summary != want {
 		t.Fatalf("summary = %+v, want %+v", summary, want)
 	}
@@ -183,7 +183,7 @@ func TestRunHealsStaleArchive(t *testing.T) {
 
 	archives := newArchiveFixtures()
 	s := memory.New()
-	stalePlat := spec.Supported[0]
+	stalePlat := spec.SupportedPlatforms[0]
 	ocix.PushFakeArchive(t, s, "1.0.0", map[string][]byte{stalePlat.String(): []byte("old-payload")})
 	archives.set("go", s)
 	wireArchives(t, archives)
@@ -193,11 +193,11 @@ func TestRunHealsStaleArchive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if summary.Healed != 1 || summary.Filled != len(spec.Supported)-1 || summary.Failed != 0 {
-		t.Fatalf("summary = %+v, want Healed:1 Filled:%d", summary, len(spec.Supported)-1)
+	if summary.Healed != 1 || summary.Filled != len(spec.SupportedPlatforms)-1 || summary.Failed != 0 {
+		t.Fatalf("summary = %+v, want Healed:1 Filled:%d", summary, len(spec.SupportedPlatforms)-1)
 	}
 
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		got, err := ocix.ArchiveLayerDigest(context.Background(), s, "1.0.0", plat)
 		if err != nil {
 			t.Fatalf("resolve %s: %v", plat, err)
@@ -235,17 +235,17 @@ func TestRunFillsMultiPlatformWithOneIndexCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if summary.Filled != len(spec.Supported) || summary.Failed != 0 {
-		t.Fatalf("summary = %+v, want Filled:%d Failed:0", summary, len(spec.Supported))
+	if summary.Filled != len(spec.SupportedPlatforms) || summary.Failed != 0 {
+		t.Fatalf("summary = %+v, want Filled:%d Failed:0", summary, len(spec.SupportedPlatforms))
 	}
 	if got := counted.indexPushes.Load(); got != 1 {
-		t.Fatalf("index pushes = %d, want exactly 1 for a %d-platform fill", got, len(spec.Supported))
+		t.Fatalf("index pushes = %d, want exactly 1 for a %d-platform fill", got, len(spec.SupportedPlatforms))
 	}
 	if got := counted.tags.Load(); got != 1 {
-		t.Fatalf("tag calls = %d, want exactly 1 for a %d-platform fill", got, len(spec.Supported))
+		t.Fatalf("tag calls = %d, want exactly 1 for a %d-platform fill", got, len(spec.SupportedPlatforms))
 	}
 
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		got, err := ocix.ArchiveLayerDigest(context.Background(), counted, "1.0.0", plat)
 		if err != nil {
 			t.Fatalf("resolve published archive for %s: %v", plat, err)
@@ -268,9 +268,9 @@ func TestRunPartialBatchCommitsSuccessfulPlatforms(t *testing.T) {
 	up := newUpstream(t)
 	wireUpstream(t, up)
 
-	failing := spec.Supported[0]
+	failing := spec.SupportedPlatforms[0]
 	sha := map[string]string{}
-	for _, p := range spec.Supported {
+	for _, p := range spec.SupportedPlatforms {
 		if p == failing {
 			sha[p.String()] = "deadbeef" // never served upstream: 404
 			continue
@@ -295,7 +295,7 @@ func TestRunPartialBatchCommitsSuccessfulPlatforms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run must not abort on an item failure: %v", err)
 	}
-	wantFilled := len(spec.Supported) - 1
+	wantFilled := len(spec.SupportedPlatforms) - 1
 	if summary.Filled != wantFilled || summary.Failed != 1 {
 		t.Fatalf("summary = %+v, want Filled:%d Failed:1", summary, wantFilled)
 	}
@@ -364,8 +364,8 @@ func TestRunBatchCommitFailureCountsAsFailedNotFilled(t *testing.T) {
 	if summary.Filled != 0 || summary.Healed != 0 {
 		t.Fatalf("summary = %+v, want Filled:0 Healed:0 — a failed commit must never count a success", summary)
 	}
-	if summary.Failed != len(spec.Supported) {
-		t.Fatalf("summary.Failed = %d, want %d (every platform in the failed batch)", summary.Failed, len(spec.Supported))
+	if summary.Failed != len(spec.SupportedPlatforms) {
+		t.Fatalf("summary.Failed = %d, want %d (every platform in the failed batch)", summary.Failed, len(spec.SupportedPlatforms))
 	}
 	if len(rep.snapshotWarns()) == 0 {
 		t.Fatal("want at least one warn for the commit failure")
@@ -485,8 +485,8 @@ func TestRunWarnAndContinueSiblingCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run must not abort on an item failure: %v", err)
 	}
-	if summary.Failed != 1 || summary.Filled != len(spec.Supported) {
-		t.Fatalf("summary = %+v, want Failed:1 Filled:%d", summary, len(spec.Supported))
+	if summary.Failed != 1 || summary.Filled != len(spec.SupportedPlatforms) {
+		t.Fatalf("summary = %+v, want Failed:1 Filled:%d", summary, len(spec.SupportedPlatforms))
 	}
 
 	brokenTask := rep.taskFor("Filling broken")
@@ -501,7 +501,7 @@ func TestRunWarnAndContinueSiblingCompletes(t *testing.T) {
 	if healthyTask == nil {
 		t.Fatal("no task for healthy")
 	}
-	wantHealthyOutcome := fmt.Sprintf("Filled healthy (%d fill(s), 0 heal(s))", len(spec.Supported))
+	wantHealthyOutcome := fmt.Sprintf("Filled healthy (%d fill(s), 0 heal(s))", len(spec.SupportedPlatforms))
 	if done, failed, outcome := healthyTask.snapshot(); !done || failed || outcome != wantHealthyOutcome {
 		t.Fatalf("healthy task done=%v failed=%v outcome=%q, want done %q", done, failed, outcome, wantHealthyOutcome)
 	}
@@ -624,13 +624,13 @@ func TestRunDryRunPlansEverythingNoIO(t *testing.T) {
 	archives := newArchiveFixtures()
 	presentStore := memory.New()
 	platMap := map[string][]byte{}
-	for _, plat := range spec.Supported {
+	for _, plat := range spec.SupportedPlatforms {
 		platMap[plat.String()] = presentPayload
 	}
 	ocix.PushFakeArchive(t, presentStore, "1.0.0", platMap)
 	archives.set("present", presentStore)
 	staleStore := memory.New()
-	ocix.PushFakeArchive(t, staleStore, "1.0.0", map[string][]byte{spec.Supported[0].String(): []byte("old")})
+	ocix.PushFakeArchive(t, staleStore, "1.0.0", map[string][]byte{spec.SupportedPlatforms[0].String(): []byte("old")})
 	archives.set("stale", &noPushTarget{Target: staleStore, t: t})
 	archives.set("missing", &noPushTarget{Target: memory.New(), t: t})
 	wireArchives(t, archives)
@@ -642,9 +642,9 @@ func TestRunDryRunPlansEverythingNoIO(t *testing.T) {
 	}
 	want := Summary{
 		Packages:    4,
-		Filled:      len(spec.Supported) + (len(spec.Supported) - 1), // missing: every platform; stale: its non-stale platforms
-		Healed:      1,                                               // stale package: the one stale platform
-		Present:     len(spec.Supported),                             // present package
+		Filled:      len(spec.SupportedPlatforms) + (len(spec.SupportedPlatforms) - 1), // missing: every platform; stale: its non-stale platforms
+		Healed:      1,                                                                 // stale package: the one stale platform
+		Present:     len(spec.SupportedPlatforms),                                      // present package
 		NotFillable: 1,
 		DryRun:      true,
 	}
@@ -742,8 +742,8 @@ func TestRunPkgScopingFiltersToNamed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if summary.Packages != 1 || summary.Filled != len(spec.Supported) {
-		t.Fatalf("summary = %+v, want Packages:1 Filled:%d", summary, len(spec.Supported))
+	if summary.Packages != 1 || summary.Filled != len(spec.SupportedPlatforms) {
+		t.Fatalf("summary = %+v, want Packages:1 Filled:%d", summary, len(spec.SupportedPlatforms))
 	}
 	for _, name := range archives.openedNames() {
 		if name == "curl" {
@@ -808,17 +808,17 @@ func TestRunDeterministicSummaryUnderParallel(t *testing.T) {
 			pkgs[name] = urlPkg(name, "1.0.0", up.URL+"/"+name+"/{{.Version}}", sha256Hex(payload))
 			s := memory.New()
 			platMap := map[string][]byte{}
-			for _, plat := range spec.Supported {
+			for _, plat := range spec.SupportedPlatforms {
 				platMap[plat.String()] = payload
 			}
 			ocix.PushFakeArchive(t, s, "1.0.0", platMap)
 			archives.set(name, s)
-			wantPresent += len(spec.Supported)
+			wantPresent += len(spec.SupportedPlatforms)
 		case 1: // missing -> filled
 			payload := []byte(name)
 			pkgs[name] = urlPkg(name, "1.0.0", up.URL+"/"+name+"/{{.Version}}", sha256Hex(payload))
 			up.set("/"+name+"/1.0.0", payload)
-			wantFilled += len(spec.Supported)
+			wantFilled += len(spec.SupportedPlatforms)
 		case 2: // not fillable
 			pkgs[name] = ociPkg(name, "1.0.0")
 			wantNotFillable++
