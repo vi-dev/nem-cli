@@ -20,6 +20,7 @@ builds:
       - -s -w
       - -X main.version={{ .Summary }}
       - -X main.buildTime={{ .Date }}
+      - -X main.channel=unstable
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 # A literal version slot keeps the asset name fixed across builds — install.sh

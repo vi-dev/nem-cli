@@ -148,32 +148,58 @@ func ExecutablePath() (string, error) {
 // tightly rate-limited per IP.
 func (u *Updater) ResolveLatest(ctx context.Context) (string, error) {
 	url := fmt.Sprintf("%s/repos/%s/releases/latest", u.APIBase, u.Repo)
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := u.apiJSON(ctx, url, &release); err != nil {
+		return "", err
+	}
+	if release.TagName == "" {
+		return "", fmt.Errorf("release metadata from %s has no tag_name", url)
+	}
+	return release.TagName, nil
+}
+
+// ResolveUnstableCommit returns the SHA of the commit the rolling unstable
+// release was built from, by resolving the unstable tag through the GitHub
+// commits API (which follows annotated tags). Token, when set, authenticates
+// the call.
+func (u *Updater) ResolveUnstableCommit(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("%s/repos/%s/commits/unstable", u.APIBase, u.Repo)
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := u.apiJSON(ctx, url, &commit); err != nil {
+		return "", err
+	}
+	if commit.SHA == "" {
+		return "", fmt.Errorf("commit metadata from %s has no sha", url)
+	}
+	return commit.SHA, nil
+}
+
+// apiJSON fetches url, authenticating with the token when set, and decodes
+// the JSON response into v.
+func (u *Updater) apiJSON(ctx context.Context, url string, v any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("build request for %s: %w", url, err)
+		return fmt.Errorf("build request for %s: %w", url, err)
 	}
 	if u.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+u.Token)
 	}
 	resp, err := u.Client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch %s: %w", url, err)
+		return fmt.Errorf("fetch %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
+		return fmt.Errorf("fetch %s: unexpected status %s", url, resp.Status)
 	}
-
-	var release struct {
-		TagName string `json:"tag_name"`
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(v); err != nil {
+		return fmt.Errorf("decode response from %s: %w", url, err)
 	}
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAPIBody)).Decode(&release); err != nil {
-		return "", fmt.Errorf("decode release metadata from %s: %w", url, err)
-	}
-	if release.TagName == "" {
-		return "", fmt.Errorf("release metadata from %s has no tag_name", url)
-	}
-	return release.TagName, nil
+	return nil
 }
 
 // assetName builds the release-archive file name for version on goos/goarch.

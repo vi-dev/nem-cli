@@ -18,8 +18,9 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
-      - -X main.version={{ .Version }}
+      - -X main.version=v{{ .Version }}
       - -X main.buildTime={{ .Date }}
+      - -X main.channel=stable
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:

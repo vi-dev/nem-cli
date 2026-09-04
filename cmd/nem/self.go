@@ -29,16 +29,17 @@ func newSelfUpdateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "update",
 		Aliases: []string{"up"},
-		Short:   "Update nem to the latest release",
+		Short:   "Update nem to the latest build on its channel",
 		Long: "Download a nem release build, verify its checksum, and replace " +
-			"the running binary with it. Without --version, updates to the " +
-			"latest stable release.",
+			"the running binary with it. Without --version, updates within " +
+			"the current channel: stable builds to the latest release, " +
+			"unstable builds to the current rolling build from main.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSelfUpdate(cmd.Context(), targetVersion, check)
 		},
 	}
-	cmd.Flags().StringVar(&targetVersion, "version", "", `release tag to install, like v1.2.3, or "unstable"`)
+	cmd.Flags().StringVar(&targetVersion, "version", "", `release tag to install, like v1.2.3, "stable" for the latest release, or "unstable"`)
 	cmd.Flags().BoolVar(&check, "check", false, "only report whether an update is available")
 	return cmd
 }
@@ -47,13 +48,20 @@ func runSelfUpdate(ctx context.Context, targetVersion string, check bool) error 
 	if version == "dev" {
 		return errors.New("this nem build did not come from a release; update it the way it was built (e.g. make install)")
 	}
-	if targetVersion != "" && targetVersion != "unstable" && !strings.HasPrefix(targetVersion, "v") {
-		return fmt.Errorf(`invalid --version %q: want a release tag like v1.2.3, or "unstable"`, targetVersion)
+	if targetVersion != "" && targetVersion != "unstable" && targetVersion != "stable" && !strings.HasPrefix(targetVersion, "v") {
+		return fmt.Errorf(`invalid --version %q: want a release tag like v1.2.3, "stable", or "unstable"`, targetVersion)
 	}
 
 	updater := newSelfUpdater()
 	target := targetVersion
 	if target == "" {
+		if channel == "unstable" {
+			target = "unstable"
+		} else {
+			target = "stable"
+		}
+	}
+	if target == "stable" {
 		resolved, err := updater.ResolveLatest(ctx)
 		if err != nil {
 			return err
@@ -61,8 +69,26 @@ func runSelfUpdate(ctx context.Context, targetVersion string, check bool) error 
 		target = resolved
 	}
 
+	upToDate := false
+	if target == "unstable" {
+		// Only a build from the unstable pipeline can match the rolling
+		// build; a release build from the same commit still differs in its
+		// stamped version and channel.
+		if channel == "unstable" {
+			remote, err := updater.ResolveUnstableCommit(ctx)
+			if err != nil {
+				return err
+			}
+			commit := currentCommit()
+			upToDate = commit != "" && commit == remote
+		}
+	} else {
+		// Older release builds report their version without the leading v.
+		upToDate = strings.TrimPrefix(target, "v") == strings.TrimPrefix(version, "v")
+	}
+
 	if check {
-		if target == version {
+		if upToDate {
 			console.Data("nem %s is up to date\n", version)
 		} else {
 			console.Data("Update available: nem %s → %s\n", version, target)
@@ -70,12 +96,16 @@ func runSelfUpdate(ctx context.Context, targetVersion string, check bool) error 
 		return nil
 	}
 
-	if target == version {
+	if upToDate {
 		console.Success("nem %s is up to date", version)
 		return nil
 	}
 	if target == "unstable" {
-		console.Warn("Installing the unstable build from main — not a released version")
+		if channel == "unstable" {
+			console.Info("Following the unstable channel; `nem self update --version stable` switches back to releases")
+		} else {
+			console.Warn("Installing the unstable build from main — not a released version")
+		}
 	}
 
 	exePath, err := selfExecutablePath()
@@ -94,11 +124,20 @@ func runSelfUpdate(ctx context.Context, targetVersion string, check bool) error 
 	return nil
 }
 
-// newSelfUpdater and selfExecutablePath are package vars so tests can point
-// the command at a local release server and a scratch binary.
+// newSelfUpdater, selfExecutablePath, and currentCommit are package vars so
+// tests can point the command at a local release server, a scratch binary,
+// and a fixed build commit.
 var (
 	newSelfUpdater = func() *selfupdate.Updater {
 		return selfupdate.NewUpdater(os.Getenv("GITHUB_TOKEN"))
 	}
 	selfExecutablePath = selfupdate.ExecutablePath
+	currentCommit      = func() string {
+		// A modified tree makes the revision an unreliable identity.
+		rev, modified := vcsRevision()
+		if modified {
+			return ""
+		}
+		return rev
+	}
 )

@@ -80,7 +80,7 @@ Prebuilt binaries for Linux and macOS are also attached to every
 An installed `nem` updates itself:
 
 ```shell
-nem self update             # latest stable release
+nem self update             # latest build on the current channel
 nem self update --check     # only report whether an update is available
 nem self update --version v0.1.0
 ```
@@ -117,7 +117,7 @@ Every command supports `--help`. The main ones:
 | `nem env` / `nem exec` | Print or run a command in the composed environment |
 | `nem catalog` | Manage catalogs: add, list, remove, update, reorder, enable, disable, build, lint, publish |
 | `nem clean` | Reclaim disk space in NEM_HOME |
-| `nem self update` | Update nem itself to the latest release |
+| `nem self update` | Update nem itself on its release channel |
 
 ## Container image
 
