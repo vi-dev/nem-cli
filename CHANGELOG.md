@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/vi-dev/nem-cli/compare/v0.3.0...v0.4.0) (2026-09-04)
+
+
+### Features
+
+* Add nem update command ([4e95481](https://github.com/vi-dev/nem-cli/commit/4e95481ddeeec7e00eb57766b9a704be624ad88a))
+* Resolve versions within dependency constraints ([77fe8a7](https://github.com/vi-dev/nem-cli/commit/77fe8a75e9e1bd8a986ee270cef393c57985df58))
+* Update `nem self update` to track release channels ([ec75930](https://github.com/vi-dev/nem-cli/commit/ec75930bfe00b8ed9ee2e50c42fb0bfc5c772c76))
+
 ## [0.3.0](https://github.com/vi-dev/nem-cli/compare/v0.2.0...v0.3.0) (2026-09-01)
 
 
